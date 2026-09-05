@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum SessionStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  LOGGED_OUT
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  STICKER
+  UNKNOWN
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  memberships      Membership[]
+  whatsappSessions WhatsappSession[]
+  contacts         Contact[]
+  conversations    Conversation[]
+  pipelines        Pipeline[]
+  deals            Deal[]
+  campaigns        Campaign[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  memberships          Membership[]
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  assignedDeals        Deal[]         @relation("AssignedAgent")
+  sentMessages         Message[]      @relation("SentBy")
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  role           Role     @default(AGENT)
+  createdAt      DateTime @default(now())
+
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model WhatsappSession {
+  id          String        @id @default(cuid())
+  name        String
+  phoneNumber String?
+  status      SessionStatus @default(PENDING)
+  qrCode      String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations  Conversation[]
+  campaigns      Campaign[]
+
+  @@index([organizationId])
+}
+
+model Contact {
+  id          String   @id @default(cuid())
+  waJid       String
+  name        String?
+  phoneNumber String
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations  Conversation[]
+  deals          Deal[]
+  campaignRecipients CampaignRecipient[]
+
+  @@unique([organizationId, waJid])
+  @@index([organizationId])
+}
+
+model Conversation {
+  id            String              @id @default(cuid())
+  lastMessageAt DateTime            @default(now())
+  unreadCount   Int                 @default(0)
+  status        ConversationStatus  @default(OPEN)
+  createdAt     DateTime            @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  whatsappSessionId String
+  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  assignedUserId String?
+  assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
+
+  messages Message[]
+
+  @@unique([whatsappSessionId, contactId])
+  @@index([organizationId])
+}
+
+model Message {
+  id            String            @id @default(cuid())
+  direction     MessageDirection
+  type          MessageType       @default(TEXT)
+  content       String?
+  mediaUrl      String?
+  waMessageId   String?
+  status        MessageStatus     @default(PENDING)
+  createdAt     DateTime          @default(now())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  sentByUserId String?
+  sentByUser   User?   @relation("SentBy", fields: [sentByUserId], references: [id])
+
+  @@index([conversationId])
+}
+
+model Pipeline {
+  id        String   @id @default(cuid())
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  stages PipelineStage[]
+  deals  Deal[]
+
+  @@index([organizationId])
+}
+
+model PipelineStage {
+  id    String @id @default(cuid())
+  name  String
+  order Int
+  color String?
+
+  pipelineId String
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  deals Deal[]
+
+  @@index([pipelineId])
+}
+
+model Deal {
+  id        String   @id @default(cuid())
+  title     String
+  value     Float?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  pipelineId String
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  stageId String
+  stage   PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  assignedUserId String?
+  assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([stageId])
+}
+
+model Campaign {
+  id              String         @id @default(cuid())
+  name            String
+  messageTemplate String
+  status          CampaignStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  createdAt       DateTime       @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  whatsappSessionId String
+  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  recipients CampaignRecipient[]
+
+  @@index([organizationId])
+}
+
+model CampaignRecipient {
+  id        String                  @id @default(cuid())
+  status    CampaignRecipientStatus @default(PENDING)
+  sentAt    DateTime?
+  error     String?
+
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+}

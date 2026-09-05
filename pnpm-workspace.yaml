@@ -1,0 +1,16 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# baileys@6.17.16 lists @whiskeysockets/eslint-config (a git dependency) as a
+# runtime dependency by mistake; pnpm blocks git-resolved transitive deps by
+# default as a supply-chain safety measure, so we allow it for this known case.
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  protobufjs: true
+
+blockExoticSubdeps: false
