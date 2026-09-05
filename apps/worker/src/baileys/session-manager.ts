@@ -379,6 +379,83 @@ async function recordMessage(
       .add("transcribe", { organizationId, messageId: message.id, mediaUrl: absoluteMediaUrl })
       .catch((err) => console.error("enqueue_transcription_failed", err));
   }
+
+  // Autoatendimento only ever reacts to a live inbound message with a single reply to that
+  // same contact — never a bulk/broadcast send, and never triggered by history-sync replay.
+  if (!opts.isHistorical && !fromMe) {
+    await maybeAutoReply(sessionId, organizationId, conversation, contact, text).catch((err) =>
+      console.error("auto_reply_error", err),
+    );
+  }
+}
+
+// Strips accents so a keyword like "preco" also matches "preço" — Portuguese customers
+// type diacritics inconsistently, and a plain case-insensitive compare misses that.
+function foldAccents(text: string): string {
+  return text.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+async function maybeAutoReply(
+  sessionId: string,
+  organizationId: string,
+  conversation: { id: string; assignedUserId: string | null },
+  contact: { waJid: string },
+  text: string,
+) {
+  // Once a human has taken over the conversation, autoatendimento steps aside.
+  if (conversation.assignedUserId) return;
+
+  const org = await prisma.organization.findUnique({ where: { id: organizationId } });
+  if (!org?.autoReplyEnabled) return;
+
+  let replyText: string | null = null;
+
+  if (org.greetingMessage) {
+    const inboundCount = await prisma.message.count({
+      where: { conversationId: conversation.id, direction: MessageDirection.INBOUND },
+    });
+    if (inboundCount === 1) replyText = org.greetingMessage;
+  }
+
+  if (!replyText && text) {
+    const normalized = foldAccents(text.toLowerCase());
+    const rules = await prisma.autoReplyRule.findMany({
+      where: { organizationId, isActive: true },
+      orderBy: { order: "asc" },
+    });
+    const matched = rules.find((rule) => rule.keywords.some((keyword) => normalized.includes(foldAccents(keyword.toLowerCase()))));
+    if (matched) replyText = matched.reply;
+  }
+
+  if (!replyText) return;
+
+  const replyMessage = await prisma.message.create({
+    data: {
+      conversationId: conversation.id,
+      direction: MessageDirection.OUTBOUND,
+      type: MessageType.TEXT,
+      content: replyText,
+      status: MessageStatus.PENDING,
+    },
+  });
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+  try {
+    await sendOutboundMessage({
+      organizationId,
+      sessionId,
+      conversationId: conversation.id,
+      messageId: replyMessage.id,
+      waJid: contact.waJid,
+      text: replyText,
+    });
+  } catch (err) {
+    console.error("auto_reply_send_failed", err);
+  }
+
+  const updated = await prisma.message.findUniqueOrThrow({ where: { id: replyMessage.id } });
+  publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message: updated });
+  publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
 }
 
 function detectMessageType(msg: proto.IWebMessageInfo): MessageType {

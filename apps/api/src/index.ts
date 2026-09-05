@@ -17,6 +17,7 @@ import { tagsRouter } from "./modules/tags/tags.routes";
 import { organizationsRouter } from "./modules/organizations/organizations.routes";
 import { whatsappLabelsRouter } from "./modules/whatsapp-labels/whatsapp-labels.routes";
 import { scheduledMessagesRouter } from "./modules/scheduled-messages/scheduled-messages.routes";
+import { autoReplyRulesRouter } from "./modules/auto-reply-rules/auto-reply-rules.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
@@ -36,6 +37,7 @@ app.use("/tags", tagsRouter);
 app.use("/organizations", organizationsRouter);
 app.use("/whatsapp-labels", whatsappLabelsRouter);
 app.use(scheduledMessagesRouter);
+app.use("/auto-reply-rules", autoReplyRulesRouter);
 
 app.use(errorHandler);
 

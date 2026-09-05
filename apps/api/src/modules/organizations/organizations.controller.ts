@@ -6,10 +6,20 @@ import { HttpError } from "../../utils/httpError";
 
 export async function getMyOrganization(req: Request, res: Response) {
   const org = await prisma.organization.findUniqueOrThrow({ where: { id: req.auth!.organizationId } });
-  res.json({ id: org.id, name: org.name, hasGroqApiKey: !!org.groqApiKey });
+  res.json({
+    id: org.id,
+    name: org.name,
+    hasGroqApiKey: !!org.groqApiKey,
+    autoReplyEnabled: org.autoReplyEnabled,
+    greetingMessage: org.greetingMessage,
+  });
 }
 
-const updateSchema = z.object({ groqApiKey: z.string().nullable() });
+const updateSchema = z.object({
+  groqApiKey: z.string().nullable().optional(),
+  autoReplyEnabled: z.boolean().optional(),
+  greetingMessage: z.string().nullable().optional(),
+});
 
 export async function updateMyOrganization(req: Request, res: Response) {
   const auth = req.auth!;
@@ -19,7 +29,17 @@ export async function updateMyOrganization(req: Request, res: Response) {
   const input = updateSchema.parse(req.body);
   const org = await prisma.organization.update({
     where: { id: auth.organizationId },
-    data: { groqApiKey: input.groqApiKey?.trim() || null },
+    data: {
+      ...(input.groqApiKey !== undefined ? { groqApiKey: input.groqApiKey?.trim() || null } : {}),
+      ...(input.autoReplyEnabled !== undefined ? { autoReplyEnabled: input.autoReplyEnabled } : {}),
+      ...(input.greetingMessage !== undefined ? { greetingMessage: input.greetingMessage?.trim() || null } : {}),
+    },
   });
-  res.json({ id: org.id, name: org.name, hasGroqApiKey: !!org.groqApiKey });
+  res.json({
+    id: org.id,
+    name: org.name,
+    hasGroqApiKey: !!org.groqApiKey,
+    autoReplyEnabled: org.autoReplyEnabled,
+    greetingMessage: org.greetingMessage,
+  });
 }

@@ -64,10 +64,17 @@ model Organization {
   // Whisper-compatible endpoint. Null/empty disables transcription for the org.
   groqApiKey String?
 
+  // Autoatendimento: a single automatic reply per inbound message, sent to the customer
+  // (never a bulk/broadcast send). `greetingMessage` fires once, on a contact's very first
+  // inbound message; AutoReplyRule below fires on keyword matches in any inbound message.
+  autoReplyEnabled Boolean @default(false)
+  greetingMessage  String?
+
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
   conversations    Conversation[]
+  autoReplyRules   AutoReplyRule[]
   pipelines        Pipeline[]
   deals            Deal[]
   notes            Note[]
@@ -299,6 +306,23 @@ model ScheduledMessage {
   createdByUser   User? @relation(fields: [createdByUserId], references: [id])
 
   @@index([conversationId])
+  @@index([organizationId])
+}
+
+// A keyword-triggered autoatendimento rule: when an inbound message contains any of
+// `keywords` (case-insensitive), `reply` is sent back automatically to that one contact.
+// Rules are checked in `order` and the first match wins — never a bulk/broadcast send.
+model AutoReplyRule {
+  id        String   @id @default(cuid())
+  keywords  String[]
+  reply     String
+  isActive  Boolean  @default(true)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
   @@index([organizationId])
 }
 

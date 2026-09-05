@@ -7,6 +7,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { InboxPage } from "./pages/InboxPage";
 import { KanbanPage } from "./pages/KanbanPage";
 import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
+import { AutoRepliesPage } from "./pages/AutoRepliesPage";
 
 export function App() {
   return (
@@ -19,6 +20,7 @@ export function App() {
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/kanban" element={<KanbanPage />} />
             <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
+            <Route path="/autoatendimento" element={<AutoRepliesPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/inbox" replace />} />
