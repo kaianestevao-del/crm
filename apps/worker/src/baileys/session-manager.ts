@@ -1,9 +1,12 @@
 import path from "path";
 import fs from "fs/promises";
+import crypto from "crypto";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
+  WAMessageStubType,
   WASocket,
   proto,
 } from "@whiskeysockets/baileys";
@@ -11,8 +14,10 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode";
 import pino from "pino";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType, SessionStatus } from "@crm/db";
+import type { OutboundMessageJob } from "@crm/shared";
 import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
+import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
 
 const prisma = getPrismaClient();
 const logger = pino({ level: "warn" });
@@ -46,6 +51,10 @@ export async function startSession(sessionId: string): Promise<void> {
     auth: state,
     logger,
     printQRInTerminal: false,
+    // Ask the phone to replay its full chat history after pairing, instead of only the
+    // last handful of messages per chat — so nothing that happened before we connected
+    // is missing from the CRM.
+    syncFullHistory: true,
   });
 
   activeSockets.set(sessionId, sock);
@@ -115,60 +124,261 @@ export async function startSession(sessionId: string): Promise<void> {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
-      await handleIncomingMessage(sessionId, session.organizationId, msg).catch((err) =>
-        console.error("handle_incoming_message_error", err),
+      await recordMessage(sessionId, session.organizationId, msg, { isHistorical: false }, sock).catch((err) =>
+        console.error("record_message_error", err),
       );
+    }
+  });
+
+  // WhatsApp replays the full chat history in one or more batches after pairing (only when
+  // syncFullHistory is on). Each batch is independent — we just record whatever it contains.
+  sock.ev.on("messaging-history.set", async ({ messages }) => {
+    for (const msg of messages) {
+      await recordMessage(sessionId, session.organizationId, msg, { isHistorical: true }, sock).catch((err) =>
+        console.error("record_history_message_error", err),
+      );
+    }
+  });
+
+  // Fires when a message is deleted — including "delete for everyone". We deliberately never
+  // touch `content`/`mediaUrl` on our own copy; we only flag it as revoked so the attendant
+  // can still read what was sent.
+  sock.ev.on("messages.update", async (updates) => {
+    for (const { key, update } of updates) {
+      if (update.messageStubType !== WAMessageStubType.REVOKE || !key.id) continue;
+      try {
+        const existing = await prisma.message.findFirst({ where: { waMessageId: key.id } });
+        if (!existing || existing.revokedAt) continue;
+        const revoked = await prisma.message.update({
+          where: { id: existing.id },
+          data: { revokedAt: new Date() },
+        });
+        publishRealtimeEvent({
+          type: "message.updated",
+          organizationId: session.organizationId,
+          conversationId: revoked.conversationId,
+          message: revoked,
+        });
+      } catch (err) {
+        console.error("mark_revoked_error", err);
+      }
+    }
+  });
+
+  // WhatsApp's own native labels (Business feature). `labels.edit` syncs the label
+  // definitions themselves (create/rename/delete); `labels.association` syncs which chats
+  // wear which label. Both fire automatically during app-state sync, and again whenever the
+  // label is changed from any device — including our own addLabel/addChatLabel calls below.
+  sock.ev.on("labels.edit", async (label) => {
+    try {
+      if (label.deleted) {
+        await prisma.whatsappLabel.deleteMany({ where: { whatsappSessionId: sessionId, waLabelId: label.id } });
+        return;
+      }
+      await prisma.whatsappLabel.upsert({
+        where: { whatsappSessionId_waLabelId: { whatsappSessionId: sessionId, waLabelId: label.id } },
+        update: { name: label.name, color: label.color },
+        create: { whatsappSessionId: sessionId, waLabelId: label.id, name: label.name, color: label.color },
+      });
+    } catch (err) {
+      console.error("sync_label_edit_error", err);
+    }
+  });
+
+  sock.ev.on("labels.association", async ({ association, type }) => {
+    if (association.type !== "label_jid") return; // we only track chat-level labels, not per-message ones
+    try {
+      const [label, contact] = await Promise.all([
+        prisma.whatsappLabel.findUnique({
+          where: { whatsappSessionId_waLabelId: { whatsappSessionId: sessionId, waLabelId: association.labelId } },
+        }),
+        prisma.contact.findUnique({
+          where: { organizationId_waJid: { organizationId: session.organizationId, waJid: association.chatId } },
+        }),
+      ]);
+      if (!label || !contact) return; // label/contact not known to us yet — nothing to associate
+
+      if (type === "add") {
+        await prisma.contactWhatsappLabel.upsert({
+          where: { contactId_labelId: { contactId: contact.id, labelId: label.id } },
+          update: {},
+          create: { contactId: contact.id, labelId: label.id },
+        });
+      } else {
+        await prisma.contactWhatsappLabel.deleteMany({ where: { contactId: contact.id, labelId: label.id } });
+      }
+      publishRealtimeEvent({ type: "contact.updated", organizationId: session.organizationId, contactId: contact.id });
+    } catch (err) {
+      console.error("sync_label_association_error", err);
     }
   });
 }
 
-async function handleIncomingMessage(sessionId: string, organizationId: string, msg: proto.IWebMessageInfo) {
-  if (!msg.message || msg.key.fromMe) return;
+export async function addWhatsappLabelToChat(sessionId: string, waJid: string, waLabelId: string) {
+  const sock = activeSockets.get(sessionId);
+  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
+  await sock.addChatLabel(waJid, waLabelId);
+}
+
+export async function removeWhatsappLabelFromChat(sessionId: string, waJid: string, waLabelId: string) {
+  const sock = activeSockets.get(sessionId);
+  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
+  await sock.removeChatLabel(waJid, waLabelId);
+}
+
+// Best-effort: creating a brand-new label (as opposed to toggling one that already exists)
+// relies on WhatsApp accepting a client-generated id, which isn't as thoroughly documented
+// as the read path above. Picks the first small integer id (as a string) not already used by
+// this session, mirroring how the official apps number their first ~20 custom labels.
+export async function createWhatsappLabel(sessionId: string, name: string, color = 0) {
+  const sock = activeSockets.get(sessionId);
+  if (!sock || !sock.user?.id) throw new Error(`session_not_connected:${sessionId}`);
+
+  const existingIds = new Set(
+    (await prisma.whatsappLabel.findMany({ where: { whatsappSessionId: sessionId }, select: { waLabelId: true } })).map(
+      (l) => l.waLabelId,
+    ),
+  );
+  let nextId = 1;
+  while (existingIds.has(String(nextId)) && nextId < 100) nextId++;
+
+  await sock.addLabel(sock.user.id, { id: String(nextId), name, color, deleted: false });
+}
+
+const EXTENSION_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "audio/ogg": "ogg",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "video/mp4": "mp4",
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+};
+
+function extensionFor(mimetype?: string | null, fileName?: string | null) {
+  if (fileName?.includes(".")) return fileName.split(".").pop()!;
+  const base = mimetype?.split(";")[0];
+  return (base && EXTENSION_BY_MIME[base]) || "bin";
+}
+
+async function downloadAndSaveMedia(
+  msg: proto.IWebMessageInfo,
+  sock: WASocket,
+): Promise<{ mediaUrl: string; absoluteMediaUrl: string; mediaName?: string } | null> {
+  const m = msg.message;
+  const mediaMsg = m?.imageMessage ?? m?.audioMessage ?? m?.videoMessage ?? m?.documentMessage;
+  if (!mediaMsg) return null;
+
+  try {
+    const buffer = (await downloadMediaMessage(msg, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
+    const fileName = m?.documentMessage?.fileName ?? undefined;
+    const ext = extensionFor(mediaMsg.mimetype, fileName);
+    const savedName = `${crypto.randomUUID()}.${ext}`;
+    const dir = path.join(env.UPLOADS_DIR, "messages");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, savedName), buffer);
+    const mediaUrl = `/uploads/messages/${savedName}`;
+    return { mediaUrl, absoluteMediaUrl: `${env.PUBLIC_URL}${mediaUrl}`, mediaName: fileName };
+  } catch (err) {
+    console.error("download_media_failed", err);
+    return null;
+  }
+}
+
+async function recordMessage(
+  sessionId: string,
+  organizationId: string,
+  msg: proto.IWebMessageInfo,
+  opts: { isHistorical: boolean },
+  sock: WASocket,
+) {
+  if (!msg.message || !msg.key.id) return;
   const jid = msg.key.remoteJid;
   if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
 
+  const fromMe = !!msg.key.fromMe;
+  const type = detectMessageType(msg);
   const text =
     msg.message.conversation ??
     msg.message.extendedTextMessage?.text ??
     msg.message.imageMessage?.caption ??
     msg.message.videoMessage?.caption ??
     "";
-
-  const type = detectMessageType(msg);
   const phoneNumber = jid.split("@")[0];
   const pushName = msg.pushName ?? undefined;
+  const messageDate = msg.messageTimestamp ? new Date(Number(msg.messageTimestamp) * 1000) : new Date();
 
   const contact = await prisma.contact.upsert({
     where: { organizationId_waJid: { organizationId, waJid: jid } },
-    update: pushName ? { name: pushName } : {},
-    create: { organizationId, waJid: jid, phoneNumber, name: pushName },
+    update: pushName && !fromMe ? { name: pushName } : {},
+    create: { organizationId, waJid: jid, phoneNumber, name: fromMe ? undefined : pushName },
   });
 
   const conversation = await prisma.conversation.upsert({
     where: { whatsappSessionId_contactId: { whatsappSessionId: sessionId, contactId: contact.id } },
-    update: { lastMessageAt: new Date(), unreadCount: { increment: 1 } },
+    update:
+      !opts.isHistorical && !fromMe
+        ? { lastMessageAt: messageDate, unreadCount: { increment: 1 } }
+        : {},
     create: {
       organizationId,
       whatsappSessionId: sessionId,
       contactId: contact.id,
-      lastMessageAt: new Date(),
-      unreadCount: 1,
+      lastMessageAt: messageDate,
+      unreadCount: !opts.isHistorical && !fromMe ? 1 : 0,
     },
   });
+
+  // History arrives newest-batch-first in some cases; never let an older message regress
+  // the conversation's "last activity" timestamp shown in the inbox list.
+  if (messageDate > conversation.lastMessageAt) {
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: messageDate } });
+  }
+
+  const existing = await prisma.message.findUnique({
+    where: { conversationId_waMessageId: { conversationId: conversation.id, waMessageId: msg.key.id } },
+  });
+  if (existing) return; // already recorded (live message arriving again in a history batch, etc.)
+
+  let mediaUrl: string | null = null;
+  let absoluteMediaUrl: string | null = null;
+  if (type === MessageType.IMAGE || type === MessageType.AUDIO || type === MessageType.VIDEO || type === MessageType.DOCUMENT) {
+    const downloaded = await downloadAndSaveMedia(msg, sock);
+    if (downloaded) {
+      mediaUrl = downloaded.mediaUrl;
+      absoluteMediaUrl = downloaded.absoluteMediaUrl;
+    }
+  }
 
   const message = await prisma.message.create({
     data: {
       conversationId: conversation.id,
-      direction: MessageDirection.INBOUND,
+      direction: fromMe ? MessageDirection.OUTBOUND : MessageDirection.INBOUND,
       type,
       content: text || null,
-      waMessageId: msg.key.id ?? undefined,
-      status: MessageStatus.DELIVERED,
+      mediaUrl,
+      waMessageId: msg.key.id,
+      status: fromMe ? MessageStatus.SENT : MessageStatus.DELIVERED,
+      createdAt: messageDate,
     },
   });
 
-  publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message });
-  publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+  if (!opts.isHistorical) {
+    publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message });
+    publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+  }
+
+  if (type === MessageType.AUDIO && absoluteMediaUrl) {
+    await transcribeAudioQueue
+      .add("transcribe", { organizationId, messageId: message.id, mediaUrl: absoluteMediaUrl })
+      .catch((err) => console.error("enqueue_transcription_failed", err));
+  }
 }
 
 function detectMessageType(msg: proto.IWebMessageInfo): MessageType {
@@ -184,10 +394,10 @@ function detectMessageType(msg: proto.IWebMessageInfo): MessageType {
 }
 
 export async function sendTextMessage(sessionId: string, waJid: string, text: string, messageId?: string) {
-  const sock = activeSockets.get(sessionId);
-  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
-
   try {
+    const sock = activeSockets.get(sessionId);
+    if (!sock) throw new Error(`session_not_connected:${sessionId}`);
+
     const result = await sock.sendMessage(waJid, { text });
     if (messageId) {
       await prisma.message.update({
@@ -200,6 +410,70 @@ export async function sendTextMessage(sessionId: string, waJid: string, text: st
     if (messageId) {
       await prisma.message.update({ where: { id: messageId }, data: { status: MessageStatus.FAILED } });
     }
+    throw err;
+  }
+}
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  ogg: "audio/ogg; codecs=opus",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  mp4: "video/mp4",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+function guessMimeType(name?: string): string {
+  const ext = name?.split(".").pop()?.toLowerCase();
+  return (ext && MIME_BY_EXTENSION[ext]) || "application/octet-stream";
+}
+
+export async function sendOutboundMessage(job: OutboundMessageJob) {
+  try {
+    const sock = activeSockets.get(job.sessionId);
+    if (!sock) throw new Error(`session_not_connected:${job.sessionId}`);
+
+    const mimetype = guessMimeType(job.mediaName ?? job.mediaUrl);
+    let content: Parameters<WASocket["sendMessage"]>[1];
+
+    if (job.mediaType === "IMAGE" && job.mediaUrl) {
+      content = { image: { url: job.mediaUrl }, mimetype, caption: job.text };
+    } else if (job.mediaType === "VIDEO" && job.mediaUrl) {
+      content = { video: { url: job.mediaUrl }, mimetype, caption: job.text };
+    } else if (job.mediaType === "AUDIO" && job.mediaUrl) {
+      // WhatsApp audio messages don't support a caption, so the signature (folded into `text`
+      // by the API) is dropped here — there is nowhere for it to be shown.
+      content = { audio: { url: job.mediaUrl }, mimetype, ptt: false };
+    } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
+      content = { document: { url: job.mediaUrl }, mimetype, fileName: job.mediaName ?? "arquivo", caption: job.text };
+    } else {
+      content = { text: job.text ?? "" };
+    }
+
+    const result = await sock.sendMessage(job.waJid, content);
+    await prisma.message.update({
+      where: { id: job.messageId },
+      data: { status: MessageStatus.SENT, waMessageId: result?.key.id ?? undefined },
+    });
+
+    if (job.mediaType === "AUDIO" && job.mediaUrl) {
+      await transcribeAudioQueue
+        .add("transcribe", { organizationId: job.organizationId, messageId: job.messageId, mediaUrl: job.mediaUrl })
+        .catch((err) => console.error("enqueue_transcription_failed", err));
+    }
+
+    return result;
+  } catch (err) {
+    await prisma.message.update({ where: { id: job.messageId }, data: { status: MessageStatus.FAILED } });
     throw err;
   }
 }

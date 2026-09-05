@@ -7,6 +7,8 @@ interface AuthUser {
   id: string;
   name: string;
   email: string;
+  signatureEnabled: boolean;
+  signatureName: string | null;
 }
 
 interface AuthOrganization {
@@ -23,6 +25,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, organizationName: string) => Promise<void>;
   logout: () => void;
+  updateSignature: (patch: { signatureEnabled?: boolean; signatureName?: string | null }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -90,9 +93,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     disconnectSocket();
   }, []);
 
+  const updateSignature = useCallback(async (patch: { signatureEnabled?: boolean; signatureName?: string | null }) => {
+    const res = await api.patch("/auth/me", patch);
+    setUser(res.data);
+  }, []);
+
   const value = useMemo(
-    () => ({ token, user, organization, loading, login, register, logout }),
-    [token, user, organization, loading, login, register, logout],
+    () => ({ token, user, organization, loading, login, register, logout, updateSignature }),
+    [token, user, organization, loading, login, register, logout, updateSignature],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

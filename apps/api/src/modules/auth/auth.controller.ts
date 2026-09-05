@@ -1,15 +1,27 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { signJwt } from "../../utils/jwt";
 import { HttpError } from "../../utils/httpError";
 import { registerSchema, loginSchema } from "./auth.schema";
 
-function toAuthResponse(user: { id: string; name: string; email: string }, organizationId: string, organizationName: string, role: Role) {
+function toAuthResponse(
+  user: { id: string; name: string; email: string; signatureEnabled: boolean; signatureName: string | null },
+  organizationId: string,
+  organizationName: string,
+  role: Role,
+) {
   return {
     token: signJwt({ sub: user.id, organizationId, role }),
-    user: { id: user.id, name: user.name, email: user.email },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      signatureEnabled: user.signatureEnabled,
+      signatureName: user.signatureName,
+    },
     organization: { id: organizationId, name: organizationName, role },
   };
 }
@@ -81,7 +93,36 @@ export async function me(req: Request, res: Response) {
   if (!user || !membership) throw new HttpError(404, "not_found");
 
   res.json({
-    user: { id: user.id, name: user.name, email: user.email },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      signatureEnabled: user.signatureEnabled,
+      signatureName: user.signatureName,
+    },
     organization: { id: membership.organizationId, name: membership.organization.name, role: membership.role },
+  });
+}
+
+const updateMeSchema = z.object({
+  signatureEnabled: z.boolean().optional(),
+  signatureName: z.string().nullable().optional(),
+});
+
+export async function updateMe(req: Request, res: Response) {
+  const input = updateMeSchema.parse(req.body);
+  const user = await prisma.user.update({
+    where: { id: req.auth!.sub },
+    data: {
+      signatureEnabled: input.signatureEnabled,
+      signatureName: input.signatureName === undefined ? undefined : input.signatureName?.trim() || null,
+    },
+  });
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    signatureEnabled: user.signatureEnabled,
+    signatureName: user.signatureName,
   });
 }

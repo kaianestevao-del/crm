@@ -13,6 +13,10 @@ import { pipelinesRouter } from "./modules/pipelines/pipelines.routes";
 import { contactsRouter } from "./modules/contacts/contacts.routes";
 import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
 import { quickRepliesRouter } from "./modules/quick-replies/quick-replies.routes";
+import { notesRouter } from "./modules/notes/notes.routes";
+import { tagsRouter } from "./modules/tags/tags.routes";
+import { organizationsRouter } from "./modules/organizations/organizations.routes";
+import { whatsappLabelsRouter } from "./modules/whatsapp-labels/whatsapp-labels.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
@@ -28,6 +32,10 @@ app.use("/pipelines", pipelinesRouter);
 app.use("/contacts", contactsRouter);
 app.use("/campaigns", campaignsRouter);
 app.use("/quick-replies", quickRepliesRouter);
+app.use("/notes", notesRouter);
+app.use("/tags", tagsRouter);
+app.use("/organizations", organizationsRouter);
+app.use("/whatsapp-labels", whatsappLabelsRouter);
 
 app.use(errorHandler);
 

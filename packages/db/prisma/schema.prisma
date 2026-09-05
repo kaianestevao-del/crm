@@ -66,6 +66,10 @@ model Organization {
   name      String
   createdAt DateTime @default(now())
 
+  // Bring-your-own-key: used by the worker to transcribe audio messages via Groq's
+  // Whisper-compatible endpoint. Null/empty disables transcription for the org.
+  groqApiKey String?
+
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
@@ -76,6 +80,7 @@ model Organization {
   notes            Note[]
   quickReplyCategories QuickReplyCategory[]
   quickReplies     QuickReply[]
+  tags             Tag[]
 }
 
 model User {
@@ -84,6 +89,11 @@ model User {
   passwordHash String
   name         String
   createdAt    DateTime @default(now())
+
+  // Appended to outgoing WhatsApp messages so customers on a shared number know who's
+  // writing. Defaults to `name` when signatureName is unset.
+  signatureEnabled Boolean @default(true)
+  signatureName    String?
 
   memberships          Membership[]
   assignedConversations Conversation[] @relation("AssignedAgent")
@@ -117,6 +127,7 @@ model WhatsappSession {
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations  Conversation[]
   campaigns      Campaign[]
+  whatsappLabels WhatsappLabel[]
 
   @@index([organizationId])
 }
@@ -135,9 +146,67 @@ model Contact {
   deals          Deal[]
   campaignRecipients CampaignRecipient[]
   notes          Note[]
+  tags           ContactTag[]
+  whatsappLabels ContactWhatsappLabel[]
 
   @@unique([organizationId, waJid])
   @@index([organizationId])
+}
+
+// Loose, multi-valued tags scoped to our own CRM (the "Abas" from the feature-parity
+// research) — independent from the Kanban pipeline stage, and independent from
+// WhatsappLabel below (which mirrors WhatsApp's own native labels).
+model Tag {
+  id    String  @id @default(cuid())
+  name  String
+  color String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  contacts ContactTag[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model ContactTag {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+}
+
+// Mirrors WhatsApp's own native Business labels (read from and written back to WhatsApp
+// itself via Baileys), kept separate from Tag so a CRM-only tag is never confused with
+// one that actually exists inside WhatsApp.
+model WhatsappLabel {
+  id        String  @id @default(cuid())
+  waLabelId String
+  name      String
+  color     Int?
+  deleted   Boolean @default(false)
+
+  whatsappSessionId String
+  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  contacts ContactWhatsappLabel[]
+
+  @@unique([whatsappSessionId, waLabelId])
+  @@index([whatsappSessionId])
+}
+
+model ContactWhatsappLabel {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  labelId   String
+  label     WhatsappLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, labelId])
+  @@index([labelId])
 }
 
 model Note {
@@ -227,12 +296,21 @@ model Message {
   status        MessageStatus     @default(PENDING)
   createdAt     DateTime          @default(now())
 
+  // Set when WhatsApp reports this message was deleted (revoked) by whoever sent it.
+  // `content`/`mediaUrl` are deliberately left untouched — we already have our own copy
+  // from the moment the message first came in, and we keep showing it to the attendant.
+  revokedAt DateTime?
+
+  // Speech-to-text transcript for AUDIO messages (filled in asynchronously by the worker).
+  transcript String?
+
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   sentByUserId String?
   sentByUser   User?   @relation("SentBy", fields: [sentByUserId], references: [id])
 
+  @@unique([conversationId, waMessageId])
   @@index([conversationId])
 }
 
