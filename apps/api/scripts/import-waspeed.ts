@@ -14,7 +14,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { getPrismaClient, Role, MessageDirection, CampaignStatus, CampaignRecipientStatus, QuickReplyType, SessionStatus } from "@crm/db";
+import { getPrismaClient, Role, MessageDirection, QuickReplyType, SessionStatus } from "@crm/db";
 
 const WASPEED_KEY = "ffce211a-7b07-4d91-ba5d-c40bb4034a83";
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads", "quick-replies");
@@ -245,33 +245,6 @@ async function main() {
     quickRepliesCreated++;
   }
 
-  console.log("Importando histórico de campanhas de envio em massa...");
-  let campaignsCreated = 0;
-  for (const batch of relatorio) {
-    const recipients = [];
-    for (const send of batch.send ?? []) {
-      const contactId = await getOrCreateContact(send.phone, send.nome);
-      if (!contactId) continue;
-      recipients.push({
-        contactId,
-        status: send.status === "Enviado" ? CampaignRecipientStatus.SENT : CampaignRecipientStatus.FAILED,
-        sentAt: send.hora ? new Date(send.hora) : undefined,
-      });
-    }
-    if (recipients.length === 0) continue;
-    await prisma.campaign.create({
-      data: {
-        organizationId: org.id,
-        whatsappSessionId: session.id,
-        name: `Campanha importada (${new Date(Number(batch.id)).toLocaleDateString("pt-BR")})`,
-        messageTemplate: "(mensagem original não preservada no relatório do WaSpeed)",
-        status: CampaignStatus.DONE,
-        recipients: { create: recipients },
-      },
-    });
-    campaignsCreated++;
-  }
-
   console.log("\n✅ Importação concluída.");
   console.log(`Organização: ${orgName} (login: ${ownerEmail})`);
   console.log(`Contatos: ${contactByPhone.size}`);
@@ -279,8 +252,7 @@ async function main() {
   console.log(`Notas importadas: ${notesCreated}`);
   console.log(`Categorias de resposta rápida: ${categoryIdMap.size}`);
   console.log(`Respostas rápidas: ${quickRepliesCreated} (${mediaFilesSaved} com mídia salva em apps/api/uploads/quick-replies)`);
-  console.log(`Campanhas históricas: ${campaignsCreated}`);
-  console.log("\nNão migrado nesta rodada (não têm um lugar correspondente no CRM ainda): agendamentosNaoDisparados, userTabs, fluxo (chatbot).");
+  console.log("\nNão migrado nesta rodada (não têm um lugar correspondente no CRM ainda): agendamentosNaoDisparados, userTabs, fluxo (chatbot), histórico de campanhas de envio em massa (funcionalidade removida do produto).");
 }
 
 main()

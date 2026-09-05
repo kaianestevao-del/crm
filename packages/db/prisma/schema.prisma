@@ -48,19 +48,6 @@ enum ConversationStatus {
   CLOSED
 }
 
-enum CampaignStatus {
-  DRAFT
-  RUNNING
-  DONE
-  FAILED
-}
-
-enum CampaignRecipientStatus {
-  PENDING
-  SENT
-  FAILED
-}
-
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -76,7 +63,6 @@ model Organization {
   conversations    Conversation[]
   pipelines        Pipeline[]
   deals            Deal[]
-  campaigns        Campaign[]
   notes            Note[]
   quickReplyCategories QuickReplyCategory[]
   quickReplies     QuickReply[]
@@ -126,7 +112,6 @@ model WhatsappSession {
   organizationId String
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations  Conversation[]
-  campaigns      Campaign[]
   whatsappLabels WhatsappLabel[]
 
   @@index([organizationId])
@@ -144,7 +129,6 @@ model Contact {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations  Conversation[]
   deals          Deal[]
-  campaignRecipients CampaignRecipient[]
   notes          Note[]
   tags           ContactTag[]
   whatsappLabels ContactWhatsappLabel[]
@@ -370,36 +354,3 @@ model Deal {
   @@index([stageId])
 }
 
-model Campaign {
-  id              String         @id @default(cuid())
-  name            String
-  messageTemplate String
-  status          CampaignStatus @default(DRAFT)
-  scheduledAt     DateTime?
-  createdAt       DateTime       @default(now())
-
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  whatsappSessionId String
-  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
-
-  recipients CampaignRecipient[]
-
-  @@index([organizationId])
-}
-
-model CampaignRecipient {
-  id        String                  @id @default(cuid())
-  status    CampaignRecipientStatus @default(PENDING)
-  sentAt    DateTime?
-  error     String?
-
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  contactId String
-  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-
-  @@index([campaignId])
-}

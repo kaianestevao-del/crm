@@ -6,8 +6,6 @@ import {
   MessageDirection,
   MessageType,
   MessageStatus,
-  CampaignStatus,
-  CampaignRecipientStatus,
 } from "@crm/db";
 
 const prisma = getPrismaClient();
@@ -143,39 +141,8 @@ async function main() {
 
   await prisma.deal.create({ data: { organizationId: org.id, pipelineId: pipeline.id, stageId: fechado.id, contactId: juliana.id, title: "Combo hidratante + máscara", value: 129, order: 0, assignedUserId: owner.id } });
 
-  // Campanhas
-  const doneCampaign = await prisma.campaign.create({
-    data: {
-      organizationId: org.id,
-      whatsappSessionId: session.id,
-      name: "Black Friday - Linha Vitamina C",
-      messageTemplate: "Oi {{name}}! A linha vitamina C está com 20% off até domingo 💛",
-      status: CampaignStatus.DONE,
-      recipients: {
-        create: [
-          { contactId: marina.id, status: CampaignRecipientStatus.SENT, sentAt: new Date(Date.now() - 2 * 86_400_000) },
-          { contactId: carlos.id, status: CampaignRecipientStatus.SENT, sentAt: new Date(Date.now() - 2 * 86_400_000) },
-          { contactId: fernanda.id, status: CampaignRecipientStatus.SENT, sentAt: new Date(Date.now() - 2 * 86_400_000) },
-          { contactId: rodrigo.id, status: CampaignRecipientStatus.FAILED, error: "número inválido" },
-        ],
-      },
-    },
-  });
-
-  await prisma.campaign.create({
-    data: {
-      organizationId: org.id,
-      whatsappSessionId: session.id,
-      name: "Reativação - clientes sem compra há 60 dias",
-      messageTemplate: "Oi {{name}}, sentimos sua falta! Separei um cupom de 15% pra você voltar 💌",
-      status: CampaignStatus.DRAFT,
-      recipients: { create: [{ contactId: paulo.id }, { contactId: juliana.id }] },
-    },
-  });
-
   console.log("Seed concluído.");
   console.log("Login demo -> email: kaian@auroracosmeticos.com.br | senha: password123");
-  console.log("Campanha exemplo:", doneCampaign.name);
 }
 
 main()

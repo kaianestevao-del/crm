@@ -34,19 +34,6 @@ export enum MessageStatus {
   FAILED = "FAILED",
 }
 
-export enum CampaignStatus {
-  DRAFT = "DRAFT",
-  RUNNING = "RUNNING",
-  DONE = "DONE",
-  FAILED = "FAILED",
-}
-
-export enum CampaignRecipientStatus {
-  PENDING = "PENDING",
-  SENT = "SENT",
-  FAILED = "FAILED",
-}
-
 // Redis pub/sub channel used by the worker to notify the API of realtime events,
 // which the API then relays to connected browser clients over Socket.IO.
 export const REALTIME_CHANNEL = "crm:realtime";
@@ -65,7 +52,6 @@ export type RealtimeEvent =
 
 // BullMQ queue names shared between the API (producer) and the worker (consumer).
 export const QUEUE_OUTBOUND_MESSAGES = "outbound-messages";
-export const QUEUE_CAMPAIGN_JOBS = "campaign-jobs";
 export const QUEUE_SESSION_COMMANDS = "session-commands";
 // Producer and consumer both live in the worker process (it's the only one with access to
 // the org's Groq key and the audio files), but the queue name is still shared so the API
@@ -91,11 +77,6 @@ export interface OutboundMessageJob {
   mediaUrl?: string;
   mediaType?: MessageType;
   mediaName?: string;
-}
-
-export interface CampaignJob {
-  organizationId: string;
-  campaignId: string;
 }
 
 export type SessionCommand = "START" | "LOGOUT" | "RESTART";

@@ -6,7 +6,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { InboxPage } from "./pages/InboxPage";
 import { KanbanPage } from "./pages/KanbanPage";
-import { CampaignsPage } from "./pages/CampaignsPage";
 import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
 
 export function App() {
@@ -19,7 +18,6 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/kanban" element={<KanbanPage />} />
-            <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
           </Route>
         </Route>

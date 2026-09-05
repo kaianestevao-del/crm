@@ -4,7 +4,6 @@ import { useAuth } from "../context/AuthContext";
 const navItems = [
   { to: "/inbox", label: "Caixa de Entrada" },
   { to: "/kanban", label: "Funil" },
-  { to: "/campaigns", label: "Campanhas" },
   { to: "/whatsapp", label: "Conexão WhatsApp" },
 ];
 
