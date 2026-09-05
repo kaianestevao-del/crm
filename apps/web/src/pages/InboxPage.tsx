@@ -120,6 +120,7 @@ export function InboxPage() {
   const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
+  const [search, setSearch] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -270,10 +271,15 @@ export function InboxPage() {
 
   const allTags = Array.from(new Map(conversations.flatMap((c) => c.contact.tags).map((t) => [t.id, t])).values());
 
-  const visibleConversations =
-    tagFilter.size === 0
-      ? conversations
-      : conversations.filter((c) => c.contact.tags.some((t) => tagFilter.has(t.id)));
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleConversations = conversations
+    .filter((c) => tagFilter.size === 0 || c.contact.tags.some((t) => tagFilter.has(t.id)))
+    .filter(
+      (c) =>
+        !normalizedSearch ||
+        contactLabel(c.contact).toLowerCase().includes(normalizedSearch) ||
+        c.contact.phoneNumber.includes(normalizedSearch),
+    );
 
   const selectedConversation = conversations.find((c) => c.id === selectedId) ?? null;
 
@@ -296,6 +302,17 @@ export function InboxPage() {
             >
               + Nova conversa
             </button>
+          </div>
+        </div>
+        <div className="border-b border-gray-100 p-2">
+          <div className="relative">
+            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nome ou telefone..."
+              className="w-full rounded-md border border-gray-300 py-1.5 pl-7 pr-2 text-sm focus:border-brand focus:outline-none"
+            />
           </div>
         </div>
         {allTags.length > 0 && (

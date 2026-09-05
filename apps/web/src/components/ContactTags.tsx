@@ -17,12 +17,12 @@ export function ContactTags({
   onChange: (tags: Tag[]) => void;
 }) {
   const [allTags, setAllTags] = useState<Tag[]>([]);
-  const [open, setOpen] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [newTagName, setNewTagName] = useState("");
 
   useEffect(() => {
-    if (open) api.get("/tags").then((res) => setAllTags(res.data));
-  }, [open]);
+    api.get("/tags").then((res) => setAllTags(res.data));
+  }, []);
 
   async function addTag(tagId: string) {
     const res = await api.post(`/contacts/${contactId}/tags`, { tagId });
@@ -37,15 +37,16 @@ export function ContactTags({
   async function createAndAddTag() {
     if (!newTagName.trim()) return;
     const res = await api.post("/tags", { name: newTagName.trim() });
+    setAllTags((prev) => (prev.some((t) => t.id === res.data.id) ? prev : [...prev, res.data]));
     await addTag(res.data.id);
     setNewTagName("");
-    setAllTags((prev) => (prev.some((t) => t.id === res.data.id) ? prev : [...prev, res.data]));
+    setShowCreate(false);
   }
 
   const availableTags = allTags.filter((t) => !tags.some((selected) => selected.id === t.id));
 
   return (
-    <div className="relative flex flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       {tags.map((tag) => (
         <span key={tag.id} className="flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand-dark">
           {tag.name}
@@ -54,47 +55,43 @@ export function ContactTags({
           </button>
         </span>
       ))}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50"
+
+      <select
+        value=""
+        onChange={(e) => {
+          if (e.target.value) addTag(e.target.value);
+        }}
+        className="rounded-full border border-dashed border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50 focus:border-brand focus:outline-none"
       >
-        + Aba
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-10 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
-          <div className="max-h-32 overflow-y-auto">
-            {availableTags.map((tag) => (
-              <button
-                key={tag.id}
-                onClick={() => {
-                  addTag(tag.id);
-                  setOpen(false);
-                }}
-                className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-gray-50"
-              >
-                {tag.name}
-              </button>
-            ))}
-            {availableTags.length === 0 && <p className="px-2 py-1 text-xs text-gray-400">Nenhuma aba disponível</p>}
-          </div>
-          <div className="mt-1 flex gap-1 border-t border-gray-100 pt-1">
-            <input
-              value={newTagName}
-              onChange={(e) => setNewTagName(e.target.value)}
-              placeholder="Nova aba..."
-              className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
-            />
-            <button
-              onClick={() => {
-                createAndAddTag();
-                setOpen(false);
-              }}
-              className="rounded-md bg-brand-dark px-2 py-1 text-xs text-white hover:opacity-90"
-            >
-              Criar
-            </button>
-          </div>
-        </div>
+        <option value="">+ Aba</option>
+        {availableTags.map((tag) => (
+          <option key={tag.id} value={tag.id}>
+            {tag.name}
+          </option>
+        ))}
+      </select>
+
+      {showCreate ? (
+        <span className="flex items-center gap-1">
+          <input
+            autoFocus
+            value={newTagName}
+            onChange={(e) => setNewTagName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && createAndAddTag()}
+            placeholder="Nome da aba..."
+            className="w-32 rounded-md border border-gray-300 px-2 py-0.5 text-xs focus:border-brand focus:outline-none"
+          />
+          <button onClick={createAndAddTag} className="text-xs font-medium text-brand-dark hover:underline">
+            Criar
+          </button>
+          <button onClick={() => setShowCreate(false)} className="text-xs text-gray-400 hover:underline">
+            ✕
+          </button>
+        </span>
+      ) : (
+        <button onClick={() => setShowCreate(true)} className="text-xs text-gray-400 hover:text-gray-600" title="Criar nova aba">
+          + nova
+        </button>
       )}
     </div>
   );

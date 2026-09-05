@@ -41,10 +41,10 @@ async function main() {
       isDefault: true,
       stages: {
         create: [
-          { name: "Novo Lead", order: 0 },
-          { name: "Em Contato", order: 1 },
+          { name: "Em Atendimento", order: 0 },
+          { name: "Apresentação", order: 1 },
           { name: "Negociação", order: 2 },
-          { name: "Fechado", order: 3 },
+          { name: "Fechamento", order: 3 },
         ],
       },
     },

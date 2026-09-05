@@ -10,15 +10,13 @@ export async function getMyOrganization(req: Request, res: Response) {
     id: org.id,
     name: org.name,
     hasGroqApiKey: !!org.groqApiKey,
-    autoReplyEnabled: org.autoReplyEnabled,
-    greetingMessage: org.greetingMessage,
+    autoTaggingEnabled: org.autoTaggingEnabled,
   });
 }
 
 const updateSchema = z.object({
   groqApiKey: z.string().nullable().optional(),
-  autoReplyEnabled: z.boolean().optional(),
-  greetingMessage: z.string().nullable().optional(),
+  autoTaggingEnabled: z.boolean().optional(),
 });
 
 export async function updateMyOrganization(req: Request, res: Response) {
@@ -31,15 +29,13 @@ export async function updateMyOrganization(req: Request, res: Response) {
     where: { id: auth.organizationId },
     data: {
       ...(input.groqApiKey !== undefined ? { groqApiKey: input.groqApiKey?.trim() || null } : {}),
-      ...(input.autoReplyEnabled !== undefined ? { autoReplyEnabled: input.autoReplyEnabled } : {}),
-      ...(input.greetingMessage !== undefined ? { greetingMessage: input.greetingMessage?.trim() || null } : {}),
+      ...(input.autoTaggingEnabled !== undefined ? { autoTaggingEnabled: input.autoTaggingEnabled } : {}),
     },
   });
   res.json({
     id: org.id,
     name: org.name,
     hasGroqApiKey: !!org.groqApiKey,
-    autoReplyEnabled: org.autoReplyEnabled,
-    greetingMessage: org.greetingMessage,
+    autoTaggingEnabled: org.autoTaggingEnabled,
   });
 }

@@ -64,17 +64,16 @@ model Organization {
   // Whisper-compatible endpoint. Null/empty disables transcription for the org.
   groqApiKey String?
 
-  // Autoatendimento: a single automatic reply per inbound message, sent to the customer
-  // (never a bulk/broadcast send). `greetingMessage` fires once, on a contact's very first
-  // inbound message; AutoReplyRule below fires on keyword matches in any inbound message.
-  autoReplyEnabled Boolean @default(false)
-  greetingMessage  String?
+  // Autoatendimento: NOT an auto-reply — a keyword found in an inbound message links that
+  // contact to one or more existing Abas (Tags), e.g. to record which ad/story/bio link a
+  // lead came in from. See AutoTagRule below. Never sends anything to the customer.
+  autoTaggingEnabled Boolean @default(false)
 
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
   conversations    Conversation[]
-  autoReplyRules   AutoReplyRule[]
+  autoTagRules     AutoTagRule[]
   pipelines        Pipeline[]
   deals            Deal[]
   notes            Note[]
@@ -165,6 +164,7 @@ model Tag {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   contacts ContactTag[]
+  autoTagRules AutoTagRuleTag[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -310,12 +310,12 @@ model ScheduledMessage {
 }
 
 // A keyword-triggered autoatendimento rule: when an inbound message contains any of
-// `keywords` (case-insensitive), `reply` is sent back automatically to that one contact.
-// Rules are checked in `order` and the first match wins — never a bulk/broadcast send.
-model AutoReplyRule {
+// `keywords` (case-insensitive, accent-folded), the linked Tags (Abas) below are attached to
+// that contact — e.g. to record which ad, story, or bio link a lead came in from. Rules are
+// checked in `order` and the first match wins. This never sends anything back to the contact.
+model AutoTagRule {
   id        String   @id @default(cuid())
   keywords  String[]
-  reply     String
   isActive  Boolean  @default(true)
   order     Int      @default(0)
   createdAt DateTime @default(now())
@@ -323,7 +323,19 @@ model AutoReplyRule {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  tags AutoTagRuleTag[]
+
   @@index([organizationId])
+}
+
+model AutoTagRuleTag {
+  ruleId String
+  rule   AutoTagRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  tagId  String
+  tag    Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([ruleId, tagId])
+  @@index([tagId])
 }
 
 model Message {

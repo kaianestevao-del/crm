@@ -380,12 +380,12 @@ async function recordMessage(
       .catch((err) => console.error("enqueue_transcription_failed", err));
   }
 
-  // Autoatendimento only ever reacts to a live inbound message with a single reply to that
-  // same contact — never a bulk/broadcast send, and never triggered by history-sync replay.
+  // Autoatendimento here means auto-tagging, not auto-replying: a keyword in a live inbound
+  // message links the contact to one or more Abas (e.g. to record which ad/story/bio link a
+  // lead came from). Nothing is ever sent back to the contact, and history-sync replay never
+  // triggers it (it would otherwise re-tag every contact off their oldest messages).
   if (!opts.isHistorical && !fromMe) {
-    await maybeAutoReply(sessionId, organizationId, conversation, contact, text).catch((err) =>
-      console.error("auto_reply_error", err),
-    );
+    await maybeAutoTag(organizationId, contact.id, text).catch((err) => console.error("auto_tag_error", err));
   }
 }
 
@@ -395,67 +395,27 @@ function foldAccents(text: string): string {
   return text.normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
-async function maybeAutoReply(
-  sessionId: string,
-  organizationId: string,
-  conversation: { id: string; assignedUserId: string | null },
-  contact: { waJid: string },
-  text: string,
-) {
-  // Once a human has taken over the conversation, autoatendimento steps aside.
-  if (conversation.assignedUserId) return;
+async function maybeAutoTag(organizationId: string, contactId: string, text: string) {
+  if (!text) return;
 
   const org = await prisma.organization.findUnique({ where: { id: organizationId } });
-  if (!org?.autoReplyEnabled) return;
+  if (!org?.autoTaggingEnabled) return;
 
-  let replyText: string | null = null;
-
-  if (org.greetingMessage) {
-    const inboundCount = await prisma.message.count({
-      where: { conversationId: conversation.id, direction: MessageDirection.INBOUND },
-    });
-    if (inboundCount === 1) replyText = org.greetingMessage;
-  }
-
-  if (!replyText && text) {
-    const normalized = foldAccents(text.toLowerCase());
-    const rules = await prisma.autoReplyRule.findMany({
-      where: { organizationId, isActive: true },
-      orderBy: { order: "asc" },
-    });
-    const matched = rules.find((rule) => rule.keywords.some((keyword) => normalized.includes(foldAccents(keyword.toLowerCase()))));
-    if (matched) replyText = matched.reply;
-  }
-
-  if (!replyText) return;
-
-  const replyMessage = await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      direction: MessageDirection.OUTBOUND,
-      type: MessageType.TEXT,
-      content: replyText,
-      status: MessageStatus.PENDING,
-    },
+  const normalized = foldAccents(text.toLowerCase());
+  const rules = await prisma.autoTagRule.findMany({
+    where: { organizationId, isActive: true },
+    orderBy: { order: "asc" },
+    include: { tags: true },
   });
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+  const matched = rules.find((rule) => rule.keywords.some((keyword) => normalized.includes(foldAccents(keyword.toLowerCase()))));
+  if (!matched || matched.tags.length === 0) return;
 
-  try {
-    await sendOutboundMessage({
-      organizationId,
-      sessionId,
-      conversationId: conversation.id,
-      messageId: replyMessage.id,
-      waJid: contact.waJid,
-      text: replyText,
-    });
-  } catch (err) {
-    console.error("auto_reply_send_failed", err);
-  }
+  await prisma.contactTag.createMany({
+    data: matched.tags.map((t) => ({ contactId, tagId: t.tagId })),
+    skipDuplicates: true,
+  });
 
-  const updated = await prisma.message.findUniqueOrThrow({ where: { id: replyMessage.id } });
-  publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message: updated });
-  publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+  publishRealtimeEvent({ type: "contact.updated", organizationId, contactId });
 }
 
 function detectMessageType(msg: proto.IWebMessageInfo): MessageType {
