@@ -32,3 +32,15 @@ export async function createContact(req: Request, res: Response) {
   });
   res.status(201).json(contact);
 }
+
+export async function listContactNotes(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId } });
+  if (!contact) return res.status(404).json({ error: "contact_not_found" });
+
+  const notes = await prisma.note.findMany({
+    where: { contactId: contact.id },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(notes);
+}

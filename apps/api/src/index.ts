@@ -1,4 +1,5 @@
 import "./env";
+import path from "path";
 import { createServer } from "http";
 import express from "express";
 import cors from "cors";
@@ -11,10 +12,12 @@ import { conversationsRouter } from "./modules/conversations/conversations.route
 import { pipelinesRouter } from "./modules/pipelines/pipelines.routes";
 import { contactsRouter } from "./modules/contacts/contacts.routes";
 import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
+import { quickRepliesRouter } from "./modules/quick-replies/quick-replies.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
 app.use(express.json());
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -24,6 +27,7 @@ app.use("/conversations", conversationsRouter);
 app.use("/pipelines", pipelinesRouter);
 app.use("/contacts", contactsRouter);
 app.use("/campaigns", campaignsRouter);
+app.use("/quick-replies", quickRepliesRouter);
 
 app.use(errorHandler);
 

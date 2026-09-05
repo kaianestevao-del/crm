@@ -73,6 +73,9 @@ model Organization {
   pipelines        Pipeline[]
   deals            Deal[]
   campaigns        Campaign[]
+  notes            Note[]
+  quickReplyCategories QuickReplyCategory[]
+  quickReplies     QuickReply[]
 }
 
 model User {
@@ -131,8 +134,61 @@ model Contact {
   conversations  Conversation[]
   deals          Deal[]
   campaignRecipients CampaignRecipient[]
+  notes          Note[]
 
   @@unique([organizationId, waJid])
+  @@index([organizationId])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+}
+
+enum QuickReplyType {
+  TEXT
+  IMAGE
+  AUDIO
+  DOCUMENT
+}
+
+model QuickReplyCategory {
+  id       String  @id @default(cuid())
+  name     String
+  hexColor String?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  quickReplies QuickReply[]
+
+  @@index([organizationId])
+}
+
+model QuickReply {
+  id        String         @id @default(cuid())
+  title     String
+  type      QuickReplyType @default(TEXT)
+  content   String?
+  mediaUrl  String?
+  mediaName String?
+  createdAt DateTime       @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   QuickReplyCategory? @relation(fields: [categoryId], references: [id])
+
   @@index([organizationId])
 }
 
