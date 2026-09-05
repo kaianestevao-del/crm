@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
-function serialize(rule: { id: string; keywords: string[]; isActive: boolean; order: number; createdAt: Date; tags: { tag: { id: string; name: string; color: string | null } }[] }) {
+function serialize(rule: { id: string; name: string; keywords: string[]; isActive: boolean; order: number; createdAt: Date; tags: { tag: { id: string; name: string; color: string | null } }[] }) {
   const { tags, ...rest } = rule;
   return { ...rest, tags: tags.map((t) => t.tag) };
 }
@@ -18,6 +18,7 @@ export async function listAutoTagRules(req: Request, res: Response) {
 }
 
 const createSchema = z.object({
+  name: z.string().min(1),
   keywords: z.array(z.string().min(1)).min(1),
   tagIds: z.array(z.string()).min(1),
 });
@@ -34,6 +35,7 @@ export async function createAutoTagRule(req: Request, res: Response) {
   const rule = await prisma.autoTagRule.create({
     data: {
       organizationId,
+      name: input.name.trim(),
       keywords: input.keywords.map((k) => k.trim()).filter(Boolean),
       order: (lastRule?.order ?? -1) + 1,
       tags: { create: tags.map((tag) => ({ tagId: tag.id })) },
@@ -44,6 +46,7 @@ export async function createAutoTagRule(req: Request, res: Response) {
 }
 
 const updateSchema = z.object({
+  name: z.string().min(1).optional(),
   keywords: z.array(z.string().min(1)).min(1).optional(),
   tagIds: z.array(z.string()).min(1).optional(),
   isActive: z.boolean().optional(),
@@ -66,6 +69,7 @@ export async function updateAutoTagRule(req: Request, res: Response) {
   const updated = await prisma.autoTagRule.update({
     where: { id: rule.id },
     data: {
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.keywords ? { keywords: input.keywords.map((k) => k.trim()).filter(Boolean) } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },

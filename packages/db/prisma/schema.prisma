@@ -309,12 +309,14 @@ model ScheduledMessage {
   @@index([organizationId])
 }
 
-// A keyword-triggered autoatendimento rule: when an inbound message contains any of
-// `keywords` (case-insensitive, accent-folded), the linked Tags (Abas) below are attached to
-// that contact — e.g. to record which ad, story, or bio link a lead came in from. Rules are
-// checked in `order` and the first match wins. This never sends anything back to the contact.
+// A single named "autoatendimento" (e.g. "Social Seller"): when an inbound message contains
+// any of `keywords` (its trigger, case-insensitive and accent-folded), the linked Tags (Abas)
+// below are attached to that contact (its action) — e.g. to record which ad, story, or bio
+// link a lead came in from, and when. Checked in `order`, first match wins. Never sends
+// anything back to the contact.
 model AutoTagRule {
   id        String   @id @default(cuid())
+  name      String
   keywords  String[]
   isActive  Boolean  @default(true)
   order     Int      @default(0)
