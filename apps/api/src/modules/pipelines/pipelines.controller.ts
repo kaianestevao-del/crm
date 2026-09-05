@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import ExcelJS from "exceljs";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
@@ -94,4 +95,51 @@ export async function deleteDeal(req: Request, res: Response) {
   if (!deal) throw new HttpError(404, "deal_not_found");
   await prisma.deal.delete({ where: { id: deal.id } });
   res.json({ ok: true });
+}
+
+export async function exportDeals(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const deals = await prisma.deal.findMany({
+    where: { organizationId },
+    include: {
+      pipeline: { select: { name: true } },
+      stage: { select: { name: true } },
+      contact: { select: { name: true, phoneNumber: true } },
+      assignedUser: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Negócios");
+  sheet.columns = [
+    { header: "Funil", key: "pipeline", width: 20 },
+    { header: "Etapa", key: "stage", width: 20 },
+    { header: "Negócio", key: "title", width: 30 },
+    { header: "Contato", key: "contact", width: 26 },
+    { header: "Telefone", key: "phoneNumber", width: 18 },
+    { header: "Valor", key: "value", width: 14 },
+    { header: "Responsável", key: "assignedUser", width: 22 },
+    { header: "Criado em", key: "createdAt", width: 20 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  sheet.getColumn("value").numFmt = '"R$" #,##0.00';
+
+  for (const deal of deals) {
+    sheet.addRow({
+      pipeline: deal.pipeline.name,
+      stage: deal.stage.name,
+      title: deal.title,
+      contact: deal.contact.name ?? "",
+      phoneNumber: `+${deal.contact.phoneNumber}`,
+      value: deal.value ?? "",
+      assignedUser: deal.assignedUser?.name ?? "",
+      createdAt: deal.createdAt.toLocaleString("pt-BR"),
+    });
+  }
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="negocios.xlsx"`);
+  await workbook.xlsx.write(res);
+  res.end();
 }

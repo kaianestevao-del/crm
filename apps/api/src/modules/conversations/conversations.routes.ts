@@ -10,12 +10,14 @@ import {
   markAsRead,
   assignConversation,
   exportConversation,
+  startConversation,
 } from "./conversations.controller";
 
 export const conversationsRouter = Router();
 conversationsRouter.use(requireAuth);
 
 conversationsRouter.get("/", asyncHandler(listConversations));
+conversationsRouter.post("/start", asyncHandler(startConversation));
 conversationsRouter.get("/:id/messages", asyncHandler(listMessages));
 conversationsRouter.post("/:id/messages", asyncHandler(sendMessage));
 conversationsRouter.post("/:id/attachments", uploadMessageAttachment.single("file"), asyncHandler(sendAttachment));

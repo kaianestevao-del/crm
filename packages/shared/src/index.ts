@@ -97,6 +97,16 @@ export type LabelCommandJob =
   | { action: "remove"; sessionId: string; waJid: string; waLabelId: string }
   | { action: "create"; sessionId: string; name: string; color?: number };
 
+// A single scheduled message tied to one conversation (never a bulk/broadcast send — this
+// product deliberately has no mass-campaign feature). The API enqueues this as a delayed
+// BullMQ job (jobId = the ScheduledMessage row's id, so it can be cancelled by removing the
+// job); the worker looks the row up by id when the delay elapses and sends it then.
+export const QUEUE_SCHEDULED_MESSAGES = "scheduled-messages";
+
+export interface ScheduledMessageJob {
+  scheduledMessageId: string;
+}
+
 export interface JwtPayload {
   sub: string; // userId
   organizationId: string;

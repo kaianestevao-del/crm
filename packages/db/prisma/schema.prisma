@@ -48,6 +48,13 @@ enum ConversationStatus {
   CLOSED
 }
 
+enum ScheduledMessageStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -67,6 +74,7 @@ model Organization {
   quickReplyCategories QuickReplyCategory[]
   quickReplies     QuickReply[]
   tags             Tag[]
+  scheduledMessages ScheduledMessage[]
 }
 
 model User {
@@ -85,6 +93,7 @@ model User {
   assignedConversations Conversation[] @relation("AssignedAgent")
   assignedDeals        Deal[]         @relation("AssignedAgent")
   sentMessages         Message[]      @relation("SentBy")
+  scheduledMessages    ScheduledMessage[]
 }
 
 model Membership {
@@ -265,8 +274,31 @@ model Conversation {
   assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
 
   messages Message[]
+  scheduledMessages ScheduledMessage[]
 
   @@unique([whatsappSessionId, contactId])
+  @@index([organizationId])
+}
+
+model ScheduledMessage {
+  id           String                 @id @default(cuid())
+  content      String
+  scheduledFor DateTime
+  status       ScheduledMessageStatus @default(PENDING)
+  sentMessageId String?
+  error        String?
+  createdAt    DateTime               @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  createdByUserId String?
+  createdByUser   User? @relation(fields: [createdByUserId], references: [id])
+
+  @@index([conversationId])
   @@index([organizationId])
 }
 

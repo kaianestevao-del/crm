@@ -10,12 +10,14 @@ import {
   removeContactTag,
   addContactWhatsappLabel,
   removeContactWhatsappLabel,
+  exportContacts,
 } from "./contacts.controller";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
 
 contactsRouter.get("/", asyncHandler(listContacts));
+contactsRouter.get("/export", asyncHandler(exportContacts));
 contactsRouter.post("/", asyncHandler(createContact));
 contactsRouter.get("/:id/notes", asyncHandler(listContactNotes));
 contactsRouter.post("/:id/notes", asyncHandler(createContactNote));

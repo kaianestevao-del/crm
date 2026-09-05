@@ -10,6 +10,9 @@ import { SignatureSettings } from "../components/SignatureSettings";
 import { TranscriptionSettings } from "../components/TranscriptionSettings";
 import { AudioRecorderBar } from "../components/AudioRecorderBar";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
+import { NewConversationModal } from "../components/NewConversationModal";
+import { ScheduledMessages } from "../components/ScheduledMessages";
+import { downloadFile } from "../lib/download";
 
 interface Contact {
   id: string;
@@ -115,6 +118,8 @@ export function InboxPage() {
   const [exporting, setExporting] = useState(false);
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickReply | null>(null);
   const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
+  const [showNewConversation, setShowNewConversation] = useState(false);
+  const [showScheduledMessages, setShowScheduledMessages] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -172,6 +177,7 @@ export function InboxPage() {
     setSelectedId(id);
     setShowQuickReplies(false);
     setShowNotes(false);
+    setShowScheduledMessages(false);
     setPendingQuickReply(null);
     setDraft("");
     const res = await api.get(`/conversations/${id}/messages`);
@@ -247,6 +253,12 @@ export function InboxPage() {
     }
   }
 
+  async function handleConversationCreated(conversationId: string) {
+    setShowNewConversation(false);
+    await refreshConversations();
+    await selectConversation(conversationId);
+  }
+
   function toggleTagFilter(tagId: string) {
     setTagFilter((prev) => {
       const next = new Set(prev);
@@ -268,6 +280,24 @@ export function InboxPage() {
   return (
     <div className="flex h-full">
       <div className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
+        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+          <p className="text-sm font-semibold">Conversas</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => downloadFile("/contacts/export", "contatos.xlsx")}
+              title="Exportar contatos para XLSX"
+              className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              ⬇️ Contatos
+            </button>
+            <button
+              onClick={() => setShowNewConversation(true)}
+              className="rounded-md bg-brand-dark px-2 py-1 text-xs font-medium text-white hover:opacity-90"
+            >
+              + Nova conversa
+            </button>
+          </div>
+        </div>
         {allTags.length > 0 && (
           <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
             {allTags.map((tag) => (
@@ -341,6 +371,15 @@ export function InboxPage() {
                   >
                     📝 Anotações
                   </button>
+                  <button
+                    onClick={() => setShowScheduledMessages((v) => !v)}
+                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    📅 Agendar
+                  </button>
+                  {showScheduledMessages && (
+                    <ScheduledMessages conversationId={selectedConversation.id} onClose={() => setShowScheduledMessages(false)} />
+                  )}
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -443,6 +482,10 @@ export function InboxPage() {
 
       {showNotes && selectedConversation && (
         <ContactNotes contactId={selectedConversation.contact.id} onClose={() => setShowNotes(false)} />
+      )}
+
+      {showNewConversation && (
+        <NewConversationModal onClose={() => setShowNewConversation(false)} onCreated={handleConversationCreated} />
       )}
     </div>
   );

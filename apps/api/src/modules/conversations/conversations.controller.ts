@@ -30,10 +30,60 @@ export async function listConversations(req: Request, res: Response) {
   );
 }
 
-async function getOwnedConversation(organizationId: string, conversationId: string) {
+export async function getOwnedConversation(organizationId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, organizationId } });
   if (!conversation) throw new HttpError(404, "conversation_not_found");
   return conversation;
+}
+
+function normalizePhone(phone: string) {
+  return phone.replace(/\D/g, "");
+}
+
+const startConversationSchema = z.object({
+  phoneNumber: z.string().min(8),
+  name: z.string().min(1).optional(),
+});
+
+export async function startConversation(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const input = startConversationSchema.parse(req.body);
+  const phoneNumber = normalizePhone(input.phoneNumber);
+  if (phoneNumber.length < 8) throw new HttpError(400, "invalid_phone_number");
+  const waJid = `${phoneNumber}@s.whatsapp.net`;
+
+  const session = await prisma.whatsappSession.findFirst({
+    where: { organizationId, status: "CONNECTED" },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!session) throw new HttpError(400, "no_connected_whatsapp_session");
+
+  const contact = await prisma.contact.upsert({
+    where: { organizationId_waJid: { organizationId, waJid } },
+    update: input.name ? { name: input.name } : {},
+    create: { organizationId, waJid, phoneNumber, name: input.name },
+  });
+
+  const conversation = await prisma.conversation.upsert({
+    where: { whatsappSessionId_contactId: { whatsappSessionId: session.id, contactId: contact.id } },
+    update: {},
+    create: { organizationId, whatsappSessionId: session.id, contactId: contact.id },
+    include: {
+      contact: { include: { tags: { include: { tag: true } }, whatsappLabels: { include: { label: true } } } },
+      assignedUser: { select: { id: true, name: true } },
+      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+
+  const { contact: fullContact, ...rest } = conversation;
+  res.status(201).json({
+    ...rest,
+    contact: {
+      ...fullContact,
+      tags: fullContact.tags.map((t) => t.tag),
+      whatsappLabels: fullContact.whatsappLabels.map((l) => l.label),
+    },
+  });
 }
 
 export async function listMessages(req: Request, res: Response) {

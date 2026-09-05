@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
 import { api } from "../lib/api";
+import { downloadFile } from "../lib/download";
 
 interface Contact {
   id: string;
@@ -96,12 +97,20 @@ export function KanbanPage() {
     <div className="flex h-full flex-col p-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">{pipeline.name}</h1>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
-        >
-          + Novo lead
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => downloadFile("/pipelines/deals/export", "negocios.xlsx")}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            ⬇️ Exportar negócios
+          </button>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            + Novo lead
+          </button>
+        </div>
       </div>
 
       {showForm && (

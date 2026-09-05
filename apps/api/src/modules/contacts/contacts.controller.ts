@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import ExcelJS from "exceljs";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 import { labelCommandsQueue } from "../../queues";
@@ -145,4 +146,42 @@ export async function removeContactWhatsappLabel(req: Request, res: Response) {
     waLabelId: req.params.labelId,
   });
   res.status(202).json({ ok: true });
+}
+
+export async function exportContacts(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const contacts = await prisma.contact.findMany({
+    where: { organizationId },
+    include: {
+      tags: { include: { tag: true } },
+      whatsappLabels: { include: { label: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Contatos");
+  sheet.columns = [
+    { header: "Nome", key: "name", width: 28 },
+    { header: "Telefone", key: "phoneNumber", width: 18 },
+    { header: "Abas (CRM)", key: "tags", width: 30 },
+    { header: "Etiquetas do WhatsApp", key: "whatsappLabels", width: 30 },
+    { header: "Criado em", key: "createdAt", width: 20 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+
+  for (const contact of contacts) {
+    sheet.addRow({
+      name: contact.name ?? "",
+      phoneNumber: `+${contact.phoneNumber}`,
+      tags: contact.tags.map((t) => t.tag.name).join(", "),
+      whatsappLabels: contact.whatsappLabels.map((l) => l.label.name).join(", "),
+      createdAt: contact.createdAt.toLocaleString("pt-BR"),
+    });
+  }
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="contatos.xlsx"`);
+  await workbook.xlsx.write(res);
+  res.end();
 }
