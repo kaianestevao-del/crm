@@ -62,62 +62,75 @@ export async function startSession(sessionId: string): Promise<void> {
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    // A single failed DB write here (e.g. the session row was deleted while this socket was
+    // still live) must never crash the whole worker process — that would drop every other
+    // connected session too. Every branch below is independent, so one failing doesn't stop
+    // the others from running.
+    try {
+      const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
-      const qrDataUrl = await qrcode.toDataURL(qr);
-      await prisma.whatsappSession.update({
-        where: { id: sessionId },
-        data: { status: SessionStatus.PENDING, qrCode: qrDataUrl },
-      });
-      publishRealtimeEvent({
-        type: "session.qr",
-        organizationId: session.organizationId,
-        sessionId,
-        qr: qrDataUrl,
-      });
-    }
-
-    if (connection === "open") {
-      const phoneNumber = sock.user?.id ? normalizeJid(sock.user.id).split("@")[0] : null;
-      await prisma.whatsappSession.update({
-        where: { id: sessionId },
-        data: { status: SessionStatus.CONNECTED, qrCode: null, phoneNumber },
-      });
-      publishRealtimeEvent({
-        type: "session.status",
-        organizationId: session.organizationId,
-        sessionId,
-        status: SessionStatus.CONNECTED,
-        phoneNumber,
-      });
-    }
-
-    if (connection === "close") {
-      activeSockets.delete(sessionId);
-      const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
-      const loggedOut = statusCode === DisconnectReason.loggedOut;
-
-      await prisma.whatsappSession.update({
-        where: { id: sessionId },
-        data: { status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED, qrCode: null },
-      });
-      publishRealtimeEvent({
-        type: "session.status",
-        organizationId: session.organizationId,
-        sessionId,
-        status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED,
-      });
-
-      if (loggedOut) {
-        await fs.rm(sessionDir(sessionId), { recursive: true, force: true }).catch(() => {});
-      } else if (!reconnecting.has(sessionId)) {
-        reconnecting.add(sessionId);
-        setTimeout(() => {
-          reconnecting.delete(sessionId);
-          startSession(sessionId).catch((err) => console.error(`reconnect_failed:${sessionId}`, err));
-        }, 5000);
+      if (qr) {
+        const qrDataUrl = await qrcode.toDataURL(qr);
+        await prisma.whatsappSession.update({
+          where: { id: sessionId },
+          data: { status: SessionStatus.PENDING, qrCode: qrDataUrl },
+        });
+        publishRealtimeEvent({
+          type: "session.qr",
+          organizationId: session.organizationId,
+          sessionId,
+          qr: qrDataUrl,
+        });
       }
+
+      if (connection === "open") {
+        const phoneNumber = sock.user?.id ? normalizeJid(sock.user.id).split("@")[0] : null;
+        await prisma.whatsappSession.update({
+          where: { id: sessionId },
+          data: { status: SessionStatus.CONNECTED, qrCode: null, phoneNumber },
+        });
+        publishRealtimeEvent({
+          type: "session.status",
+          organizationId: session.organizationId,
+          sessionId,
+          status: SessionStatus.CONNECTED,
+          phoneNumber,
+        });
+      }
+
+      if (connection === "close") {
+        activeSockets.delete(sessionId);
+        const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+
+        await prisma.whatsappSession.update({
+          where: { id: sessionId },
+          data: { status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED, qrCode: null },
+        });
+        publishRealtimeEvent({
+          type: "session.status",
+          organizationId: session.organizationId,
+          sessionId,
+          status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED,
+        });
+
+        if (loggedOut) {
+          await fs.rm(sessionDir(sessionId), { recursive: true, force: true }).catch(() => {});
+        } else if (!reconnecting.has(sessionId)) {
+          reconnecting.add(sessionId);
+          setTimeout(() => {
+            reconnecting.delete(sessionId);
+            startSession(sessionId).catch((err) => console.error(`reconnect_failed:${sessionId}`, err));
+          }, 5000);
+        }
+      }
+    } catch (err) {
+      // Most commonly Prisma P2025 ("record not found") if the session row was deleted (or
+      // never existed) while this socket was still open — the session is gone, so drop the
+      // socket instead of leaving it running against nothing.
+      console.error(`connection_update_error:${sessionId}`, err);
+      activeSockets.delete(sessionId);
+      sock.end(undefined);
     }
   });
 
