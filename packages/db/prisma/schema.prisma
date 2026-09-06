@@ -124,15 +124,33 @@ model Membership {
   @@unique([userId, organizationId])
 }
 
+enum WhatsappProvider {
+  // Unofficial protocol via Baileys — QR Code or phone-number pairing, no message-sending
+  // restrictions, but breaks for numbers already registered on Meta's official Cloud API.
+  BAILEYS
+  // Official Meta WhatsApp Business Platform — no QR Code, receives via webhook, sends via
+  // the Graph API. Required for numbers that have ever been onboarded to the Cloud API.
+  CLOUD_API
+}
+
 model WhatsappSession {
-  id          String        @id @default(cuid())
+  id          String           @id @default(cuid())
   name        String
   phoneNumber String?
-  status      SessionStatus @default(PENDING)
+  status      SessionStatus    @default(PENDING)
   qrCode      String?
   // 8-character code for WhatsApp's "link with phone number" pairing flow — an alternative to
   // scanning the QR code, meant for a team member connecting a number remotely.
   pairingCode String?
+  provider    WhatsappProvider @default(BAILEYS)
+
+  // Cloud API credentials — only set when provider = CLOUD_API. Never returned raw by the API
+  // once saved (only a hasX boolean), same convention as Organization.groqApiKey.
+  cloudApiPhoneNumberId      String?
+  cloudApiAccessToken        String?
+  cloudApiAppSecret          String?
+  cloudApiWebhookVerifyToken String?
+
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 

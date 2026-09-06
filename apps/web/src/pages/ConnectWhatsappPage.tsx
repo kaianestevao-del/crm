@@ -10,6 +10,7 @@ interface WhatsappSession {
   status: SessionStatus;
   qrCode: string | null;
   pairingCode: string | null;
+  provider: "BAILEYS" | "CLOUD_API";
 }
 
 const statusLabel: Record<SessionStatus, string> = {
@@ -74,11 +75,15 @@ function WaLinkGenerator({ phoneNumber }: { phoneNumber: string }) {
 export function ConnectWhatsappPage() {
   const [sessions, setSessions] = useState<WhatsappSession[]>([]);
   const [newName, setNewName] = useState("");
-  const [connectMethod, setConnectMethod] = useState<"qr" | "code">("qr");
+  const [connectMethod, setConnectMethod] = useState<"qr" | "code" | "cloud">("qr");
   const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
+  const [cloudPhoneNumberId, setCloudPhoneNumberId] = useState("");
+  const [cloudAccessToken, setCloudAccessToken] = useState("");
+  const [cloudAppSecret, setCloudAppSecret] = useState("");
   const [creating, setCreating] = useState(false);
   const [linkGeneratorFor, setLinkGeneratorFor] = useState<string | null>(null);
   const [confirmDeleteFor, setConfirmDeleteFor] = useState<string | null>(null);
+  const [cloudWebhookInfo, setCloudWebhookInfo] = useState<{ url: string; verifyToken: string } | null>(null);
 
   async function refresh() {
     const res = await api.get("/whatsapp-sessions");
@@ -132,14 +137,25 @@ export function ConnectWhatsappPage() {
     e.preventDefault();
     if (!newName.trim()) return;
     if (connectMethod === "code" && !pairingPhoneNumber.trim()) return;
+    if (connectMethod === "cloud" && (!cloudPhoneNumberId.trim() || !cloudAccessToken.trim() || !cloudAppSecret.trim())) return;
     setCreating(true);
     try {
-      await api.post("/whatsapp-sessions", {
+      const res = await api.post("/whatsapp-sessions", {
         name: newName.trim(),
+        provider: connectMethod === "cloud" ? "CLOUD_API" : "BAILEYS",
         pairingPhoneNumber: connectMethod === "code" ? pairingPhoneNumber.trim() : undefined,
+        cloudApiPhoneNumberId: connectMethod === "cloud" ? cloudPhoneNumberId.trim() : undefined,
+        cloudApiAccessToken: connectMethod === "cloud" ? cloudAccessToken.trim() : undefined,
+        cloudApiAppSecret: connectMethod === "cloud" ? cloudAppSecret.trim() : undefined,
       });
+      if (connectMethod === "cloud") {
+        setCloudWebhookInfo({ url: res.data.webhookUrl, verifyToken: res.data.webhookVerifyToken });
+      }
       setNewName("");
       setPairingPhoneNumber("");
+      setCloudPhoneNumberId("");
+      setCloudAccessToken("");
+      setCloudAppSecret("");
       await refresh();
     } finally {
       setCreating(false);
@@ -187,7 +203,7 @@ export function ConnectWhatsappPage() {
             className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
 
-          <div className="mb-3 flex gap-4 text-sm">
+          <div className="mb-3 flex flex-wrap gap-4 text-sm">
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={connectMethod === "qr"} onChange={() => setConnectMethod("qr")} />
               QR Code
@@ -195,6 +211,10 @@ export function ConnectWhatsappPage() {
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={connectMethod === "code"} onChange={() => setConnectMethod("code")} />
               Código de pareamento (para conectar por número, à distância)
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={connectMethod === "cloud"} onChange={() => setConnectMethod("cloud")} />
+              API Oficial (Meta)
             </label>
           </div>
 
@@ -207,9 +227,43 @@ export function ConnectWhatsappPage() {
             />
           )}
 
+          {connectMethod === "cloud" && (
+            <div className="mb-3 space-y-2 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
+              <p className="text-xs text-gray-500">
+                Use quando o número já está cadastrado na WhatsApp Business Platform da Meta (Cloud API) — cole as
+                credenciais do seu App em Meta for Developers.
+              </p>
+              <input
+                value={cloudPhoneNumberId}
+                onChange={(e) => setCloudPhoneNumberId(e.target.value)}
+                placeholder="Phone Number ID"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+              <input
+                value={cloudAccessToken}
+                onChange={(e) => setCloudAccessToken(e.target.value)}
+                placeholder="Access Token"
+                type="password"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+              <input
+                value={cloudAppSecret}
+                onChange={(e) => setCloudAppSecret(e.target.value)}
+                placeholder="App Secret"
+                type="password"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={creating || !newName.trim() || (connectMethod === "code" && !pairingPhoneNumber.trim())}
+            disabled={
+              creating ||
+              !newName.trim() ||
+              (connectMethod === "code" && !pairingPhoneNumber.trim()) ||
+              (connectMethod === "cloud" && (!cloudPhoneNumberId.trim() || !cloudAccessToken.trim() || !cloudAppSecret.trim()))
+            }
             className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             Conectar novo número
@@ -217,20 +271,47 @@ export function ConnectWhatsappPage() {
         </form>
       )}
 
+      {cloudWebhookInfo && (
+        <div className="mb-6 max-w-xl rounded-lg border border-brand bg-brand/5 p-4 text-sm">
+          <p className="mb-2 font-medium text-brand-dark">Configure o webhook no painel da Meta</p>
+          <p className="mb-2 text-xs text-gray-600">
+            Em Meta for Developers → seu App → WhatsApp → Configuração → Webhook, cole:
+          </p>
+          <p className="mb-1 text-xs text-gray-500">URL de retorno de chamada:</p>
+          <code className="mb-2 block break-all rounded bg-white px-2 py-1 text-xs">{cloudWebhookInfo.url}</code>
+          <p className="mb-1 text-xs text-gray-500">Verificar token:</p>
+          <code className="block break-all rounded bg-white px-2 py-1 text-xs">{cloudWebhookInfo.verifyToken}</code>
+          <p className="mt-2 text-xs text-gray-500">
+            Não esqueça de inscrever o campo <code className="rounded bg-white px-1">messages</code> nesse webhook.
+          </p>
+          <button
+            onClick={() => setCloudWebhookInfo(null)}
+            className="mt-2 text-xs font-medium text-gray-500 hover:underline"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {sessions.map((session) => (
           <div key={session.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-medium">{session.name}</p>
+              <p className="font-medium">
+                {session.name}
+                {session.provider === "CLOUD_API" && (
+                  <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">API Oficial</span>
+                )}
+              </p>
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[session.status]}`}>
                 {statusLabel[session.status]}
               </span>
             </div>
             {session.phoneNumber && <p className="mb-2 text-sm text-gray-500">+{session.phoneNumber}</p>}
-            {session.status === SessionStatus.PENDING && session.qrCode && (
+            {session.provider === "BAILEYS" && session.status === SessionStatus.PENDING && session.qrCode && (
               <img src={session.qrCode} alt="QR Code" className="mx-auto h-48 w-48" />
             )}
-            {session.status === SessionStatus.PENDING && session.pairingCode && (
+            {session.provider === "BAILEYS" && session.status === SessionStatus.PENDING && session.pairingCode && (
               <div className="rounded-md bg-gray-50 py-6 text-center">
                 <p className="mb-1 text-xs text-gray-500">Digite este código no WhatsApp do funcionário</p>
                 <p className="mb-1 text-xs text-gray-400">
@@ -242,9 +323,11 @@ export function ConnectWhatsappPage() {
               </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={() => handleRestart(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
-                Reiniciar
-              </button>
+              {session.provider === "BAILEYS" && (
+                <button onClick={() => handleRestart(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
+                  Reiniciar
+                </button>
+              )}
               <button onClick={() => handleLogout(session.id)} className="text-xs font-medium text-red-600 hover:underline">
                 Desconectar
               </button>
@@ -256,7 +339,7 @@ export function ConnectWhatsappPage() {
                   🔗 Gerar link wa.me
                 </button>
               )}
-              {session.status === SessionStatus.CONNECTED && (
+              {session.provider === "BAILEYS" && session.status === SessionStatus.CONNECTED && (
                 <button onClick={() => handleResyncLabels(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
                   🔄 Ressincronizar etiquetas
                 </button>

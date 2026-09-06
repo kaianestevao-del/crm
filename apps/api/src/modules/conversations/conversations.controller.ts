@@ -52,8 +52,11 @@ export async function startConversation(req: Request, res: Response) {
   if (phoneNumber.length < 8) throw new HttpError(400, "invalid_phone_number");
   const waJid = `${phoneNumber}@s.whatsapp.net`;
 
+  // Must exclude archived sessions — otherwise a deleted-but-not-yet-fully-torn-down Baileys
+  // connection (still `status: CONNECTED` in the DB from before it was replaced) can outrank
+  // the org's real, current connection since this picks the *oldest* match.
   const session = await prisma.whatsappSession.findFirst({
-    where: { organizationId, status: "CONNECTED" },
+    where: { organizationId, status: "CONNECTED", archivedAt: null },
     orderBy: { createdAt: "asc" },
   });
   if (!session) throw new HttpError(400, "no_connected_whatsapp_session");

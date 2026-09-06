@@ -16,7 +16,9 @@ const createSchema = z.object({ name: z.string().min(1), color: z.number().int()
 
 export async function createWhatsappLabel(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
-  const session = await prisma.whatsappSession.findFirst({ where: { organizationId, status: "CONNECTED" } });
+  const session = await prisma.whatsappSession.findFirst({
+    where: { organizationId, status: "CONNECTED", archivedAt: null },
+  });
   if (!session) throw new HttpError(400, "no_connected_whatsapp_session");
 
   const input = createSchema.parse(req.body);

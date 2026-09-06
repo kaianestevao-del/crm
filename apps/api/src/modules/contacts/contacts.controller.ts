@@ -123,13 +123,15 @@ export async function removeContactTag(req: Request, res: Response) {
 // connected session for a contact that has no conversation yet.
 async function resolveSessionIdForContact(organizationId: string, contactId: string): Promise<string> {
   const conversation = await prisma.conversation.findFirst({
-    where: { organizationId, contactId },
+    where: { organizationId, contactId, whatsappSession: { archivedAt: null } },
     orderBy: { lastMessageAt: "desc" },
     select: { whatsappSessionId: true },
   });
   if (conversation) return conversation.whatsappSessionId;
 
-  const session = await prisma.whatsappSession.findFirst({ where: { organizationId, status: "CONNECTED" } });
+  const session = await prisma.whatsappSession.findFirst({
+    where: { organizationId, status: "CONNECTED", archivedAt: null },
+  });
   if (!session) throw new HttpError(400, "no_connected_whatsapp_session");
   return session.id;
 }

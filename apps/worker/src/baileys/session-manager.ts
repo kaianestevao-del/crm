@@ -8,13 +8,14 @@ import makeWASocket, {
   downloadMediaMessage,
   WAMessageStubType,
   WASocket,
+  WAMessage,
   proto,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import qrcode from "qrcode";
 import pino from "pino";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType, SessionStatus } from "@crm/db";
-import type { OutboundMessageJob } from "@crm/shared";
+import type { OutboundMessageJob, InboundCloudMessageJob } from "@crm/shared";
 import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
@@ -42,6 +43,13 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
     console.warn(`session ${sessionId} not found, skipping start`);
     return;
   }
+  // A deleted (archived) session must never come back on its own — without this, a Baileys
+  // socket that keeps closing with a non-loggedOut code (e.g. a stream conflict from the same
+  // number now registered elsewhere) reconnects every 5s forever, even after the row is gone.
+  if (session.archivedAt) return;
+  // Cloud API sessions have no socket to hold open — they're "connected" the moment valid
+  // credentials are saved, and messages flow through the webhook/Graph API instead.
+  if (session.provider === "CLOUD_API") return;
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir(sessionId));
   const { version } = await fetchLatestBaileysVersion();
@@ -123,6 +131,7 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
         activeSockets.delete(sessionId);
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
+        console.error(`session_closed:${sessionId} statusCode=${statusCode} message=${lastDisconnect?.error?.message}`);
 
         await prisma.whatsappSession.update({
           where: { id: sessionId },
@@ -319,10 +328,10 @@ async function downloadAndSaveMedia(
 ): Promise<{ mediaUrl: string; absoluteMediaUrl: string; mediaName?: string } | null> {
   const m = msg.message;
   const mediaMsg = m?.imageMessage ?? m?.audioMessage ?? m?.videoMessage ?? m?.documentMessage;
-  if (!mediaMsg) return null;
+  if (!mediaMsg || !msg.key?.id) return null;
 
   try {
-    const buffer = (await downloadMediaMessage(msg, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
+    const buffer = (await downloadMediaMessage(msg as WAMessage, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
     const fileName = m?.documentMessage?.fileName ?? undefined;
     const ext = extensionFor(mediaMsg.mimetype, fileName);
     const savedName = `${crypto.randomUUID()}.${ext}`;
@@ -337,28 +346,37 @@ async function downloadAndSaveMedia(
   }
 }
 
-async function recordMessage(
+interface NormalizedInboundMessage {
+  jid: string;
+  phoneNumber: string;
+  pushName?: string;
+  fromMe: boolean;
+  type: MessageType;
+  text: string;
+  waMessageId: string;
+  messageDate: Date;
+}
+
+interface RecordMessageHooks {
+  // Both optional and best-effort — a provider that can't cheaply supply one (or fails) just
+  // means that contact goes without an avatar / that message goes without its media, not a
+  // failure of the whole write.
+  fetchAvatarUrl?: (jid: string) => Promise<string | null>;
+  downloadMedia?: () => Promise<{ mediaUrl: string; absoluteMediaUrl: string } | null>;
+}
+
+// The actual Contact/Conversation/Message bookkeeping — arrival-month tagging, avatar, dedupe
+// by waMessageId, realtime events, transcription, autoatendimento — is identical no matter
+// which WhatsApp provider the message came from. Baileys' recordMessage() and the Cloud API's
+// processInboundCloudMessage() both normalize their own payload shape and call this.
+async function upsertContactAndRecordMessage(
   sessionId: string,
   organizationId: string,
-  msg: proto.IWebMessageInfo,
+  msg: NormalizedInboundMessage,
   opts: { isHistorical: boolean },
-  sock: WASocket,
+  hooks: RecordMessageHooks = {},
 ) {
-  if (!msg.message || !msg.key.id) return;
-  const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
-
-  const fromMe = !!msg.key.fromMe;
-  const type = detectMessageType(msg);
-  const text =
-    msg.message.conversation ??
-    msg.message.extendedTextMessage?.text ??
-    msg.message.imageMessage?.caption ??
-    msg.message.videoMessage?.caption ??
-    "";
-  const phoneNumber = jid.split("@")[0];
-  const pushName = msg.pushName ?? undefined;
-  const messageDate = msg.messageTimestamp ? new Date(Number(msg.messageTimestamp) * 1000) : new Date();
+  const { jid, phoneNumber, pushName, fromMe, type, text, waMessageId, messageDate } = msg;
 
   const existingContact = await prisma.contact.findUnique({
     where: { organizationId_waJid: { organizationId, waJid: jid } },
@@ -380,12 +398,11 @@ async function recordMessage(
     );
   }
 
-  // Fetch the WhatsApp profile photo once, the first time we see this contact — cheap enough
-  // to do inline here since we already have a live socket, and avoids hammering WhatsApp on
-  // every single message for a photo that rarely changes.
-  if (!contact.avatarUrl) {
+  // Fetch the profile photo once, the first time we see this contact — avoids hammering the
+  // provider on every single message for a photo that rarely changes.
+  if (!contact.avatarUrl && hooks.fetchAvatarUrl) {
     try {
-      const avatarUrl = await sock.profilePictureUrl(jid, "image");
+      const avatarUrl = await hooks.fetchAvatarUrl(jid);
       if (avatarUrl) {
         await prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl } });
         contact.avatarUrl = avatarUrl;
@@ -417,14 +434,17 @@ async function recordMessage(
   }
 
   const existing = await prisma.message.findUnique({
-    where: { conversationId_waMessageId: { conversationId: conversation.id, waMessageId: msg.key.id } },
+    where: { conversationId_waMessageId: { conversationId: conversation.id, waMessageId } },
   });
   if (existing) return; // already recorded (live message arriving again in a history batch, etc.)
 
   let mediaUrl: string | null = null;
   let absoluteMediaUrl: string | null = null;
-  if (type === MessageType.IMAGE || type === MessageType.AUDIO || type === MessageType.VIDEO || type === MessageType.DOCUMENT) {
-    const downloaded = await downloadAndSaveMedia(msg, sock);
+  if (
+    hooks.downloadMedia &&
+    (type === MessageType.IMAGE || type === MessageType.AUDIO || type === MessageType.VIDEO || type === MessageType.DOCUMENT)
+  ) {
+    const downloaded = await hooks.downloadMedia();
     if (downloaded) {
       mediaUrl = downloaded.mediaUrl;
       absoluteMediaUrl = downloaded.absoluteMediaUrl;
@@ -438,7 +458,7 @@ async function recordMessage(
       type,
       content: text || null,
       mediaUrl,
-      waMessageId: msg.key.id,
+      waMessageId,
       status: fromMe ? MessageStatus.SENT : MessageStatus.DELIVERED,
       createdAt: messageDate,
     },
@@ -462,6 +482,47 @@ async function recordMessage(
   if (!opts.isHistorical && !fromMe) {
     await maybeAutoTag(organizationId, contact.id, text).catch((err) => console.error("auto_tag_error", err));
   }
+}
+
+async function recordMessage(
+  sessionId: string,
+  organizationId: string,
+  msg: proto.IWebMessageInfo,
+  opts: { isHistorical: boolean },
+  sock: WASocket,
+) {
+  const key = msg.key;
+  if (!msg.message || !key?.id) return;
+  const jid = key.remoteJid;
+  if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
+
+  const type = detectMessageType(msg);
+  const text =
+    msg.message.conversation ??
+    msg.message.extendedTextMessage?.text ??
+    msg.message.imageMessage?.caption ??
+    msg.message.videoMessage?.caption ??
+    "";
+
+  await upsertContactAndRecordMessage(
+    sessionId,
+    organizationId,
+    {
+      jid,
+      phoneNumber: jid.split("@")[0],
+      pushName: msg.pushName ?? undefined,
+      fromMe: !!key.fromMe,
+      type,
+      text,
+      waMessageId: key.id,
+      messageDate: msg.messageTimestamp ? new Date(Number(msg.messageTimestamp) * 1000) : new Date(),
+    },
+    opts,
+    {
+      fetchAvatarUrl: async (j) => (await sock.profilePictureUrl(j, "image")) ?? null,
+      downloadMedia: () => downloadAndSaveMedia(msg, sock),
+    },
+  );
 }
 
 // Strips accents so a keyword like "preco" also matches "preço" — Portuguese customers
@@ -572,8 +633,62 @@ function guessMimeType(name?: string): string {
   return (ext && MIME_BY_EXTENSION[ext]) || "application/octet-stream";
 }
 
+const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
+
+async function sendCloudApiMessage(
+  job: OutboundMessageJob,
+  session: { cloudApiPhoneNumberId: string; cloudApiAccessToken: string },
+) {
+  const to = job.waJid.split("@")[0];
+  let payload: Record<string, unknown>;
+
+  if (job.mediaType === "IMAGE" && job.mediaUrl) {
+    payload = { type: "image", image: { link: job.mediaUrl, caption: job.text } };
+  } else if (job.mediaType === "VIDEO" && job.mediaUrl) {
+    payload = { type: "video", video: { link: job.mediaUrl, caption: job.text } };
+  } else if (job.mediaType === "AUDIO" && job.mediaUrl) {
+    payload = { type: "audio", audio: { link: job.mediaUrl } };
+  } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
+    payload = { type: "document", document: { link: job.mediaUrl, filename: job.mediaName ?? "arquivo", caption: job.text } };
+  } else {
+    payload = { type: "text", text: { body: job.text ?? "" } };
+  }
+
+  const res = await fetch(`${CLOUD_API_BASE}/${session.cloudApiPhoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.cloudApiAccessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", to, ...payload }),
+  });
+  const data = (await res.json()) as { messages?: { id: string }[] };
+  if (!res.ok) throw new Error(`cloud_api_send_failed:${JSON.stringify(data)}`);
+
+  await prisma.message.update({
+    where: { id: job.messageId },
+    data: { status: MessageStatus.SENT, waMessageId: data.messages?.[0]?.id },
+  });
+
+  if (job.mediaType === "AUDIO" && job.mediaUrl) {
+    await transcribeAudioQueue
+      .add("transcribe", { organizationId: job.organizationId, messageId: job.messageId, mediaUrl: job.mediaUrl })
+      .catch((err) => console.error("enqueue_transcription_failed", err));
+  }
+}
+
 export async function sendOutboundMessage(job: OutboundMessageJob) {
   try {
+    const session = await prisma.whatsappSession.findUniqueOrThrow({ where: { id: job.sessionId } });
+
+    if (session.provider === "CLOUD_API") {
+      if (!session.cloudApiPhoneNumberId || !session.cloudApiAccessToken) {
+        throw new Error(`cloud_api_not_configured:${job.sessionId}`);
+      }
+      await sendCloudApiMessage(job, {
+        cloudApiPhoneNumberId: session.cloudApiPhoneNumberId,
+        cloudApiAccessToken: session.cloudApiAccessToken,
+      });
+      return;
+    }
+
     const sock = activeSockets.get(job.sessionId);
     if (!sock) throw new Error(`session_not_connected:${job.sessionId}`);
 
@@ -613,6 +728,117 @@ export async function sendOutboundMessage(job: OutboundMessageJob) {
   }
 }
 
+function detectCloudMessageType(type: string): MessageType {
+  switch (type) {
+    case "image":
+      return MessageType.IMAGE;
+    case "video":
+      return MessageType.VIDEO;
+    case "audio":
+      return MessageType.AUDIO;
+    case "document":
+      return MessageType.DOCUMENT;
+    default:
+      return MessageType.TEXT;
+  }
+}
+
+async function downloadCloudApiMedia(
+  mediaId: string,
+  accessToken: string,
+  mimeType?: string,
+  fileName?: string,
+): Promise<{ mediaUrl: string; absoluteMediaUrl: string } | null> {
+  try {
+    // Cloud API media is two-step: resolve the id to a short-lived signed URL, then fetch it —
+    // both requests need the same bearer token.
+    const metaRes = await fetch(`${CLOUD_API_BASE}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!metaRes.ok) throw new Error(`media_lookup_failed:${metaRes.status}`);
+    const { url } = (await metaRes.json()) as { url: string };
+
+    const fileRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!fileRes.ok) throw new Error(`media_download_failed:${fileRes.status}`);
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+    const ext = extensionFor(mimeType, fileName);
+    const savedName = `${crypto.randomUUID()}.${ext}`;
+    const dir = path.join(env.UPLOADS_DIR, "messages");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, savedName), buffer);
+    const mediaUrl = `/uploads/messages/${savedName}`;
+    return { mediaUrl, absoluteMediaUrl: `${env.PUBLIC_URL}${mediaUrl}` };
+  } catch (err) {
+    console.error("download_cloud_media_failed", err);
+    return null;
+  }
+}
+
+interface CloudApiMessage {
+  from: string;
+  id: string;
+  timestamp: string;
+  type: string;
+  text?: { body?: string };
+  image?: { id: string; caption?: string; mime_type?: string };
+  video?: { id: string; caption?: string; mime_type?: string };
+  audio?: { id: string; mime_type?: string };
+  document?: { id: string; filename?: string; caption?: string; mime_type?: string };
+}
+
+interface CloudApiWebhookValue {
+  contacts?: { profile?: { name?: string }; wa_id?: string }[];
+  messages?: CloudApiMessage[];
+}
+
+// Called from the worker's inbound-cloud-messages queue processor — the API's webhook route
+// only verifies the request and enqueues the raw `value` object, all the actual writing
+// happens here so it goes through the exact same path as every Baileys-sourced message.
+export async function processInboundCloudMessage(job: InboundCloudMessageJob) {
+  const value = job.payload as CloudApiWebhookValue;
+  if (!value.messages?.length) return; // delivery-status-only webhook, nothing to record
+
+  const session = await prisma.whatsappSession.findUniqueOrThrow({ where: { id: job.sessionId } });
+  const pushName = value.contacts?.[0]?.profile?.name;
+
+  for (const m of value.messages) {
+    const type = detectCloudMessageType(m.type);
+    const text = m.text?.body ?? m.image?.caption ?? m.video?.caption ?? m.document?.caption ?? "";
+    const mediaRef = m.image ?? m.video ?? m.audio ?? m.document;
+
+    await upsertContactAndRecordMessage(
+      job.sessionId,
+      job.organizationId,
+      {
+        // Same jid convention as Baileys (`<digits>@s.whatsapp.net`) so a contact matches
+        // regardless of which provider's number they end up messaging.
+        jid: `${m.from}@s.whatsapp.net`,
+        phoneNumber: m.from,
+        pushName,
+        fromMe: false, // Meta only ever webhooks the customer's own messages, never our sends
+        type,
+        text,
+        waMessageId: m.id,
+        messageDate: new Date(Number(m.timestamp) * 1000),
+      },
+      { isHistorical: false },
+      {
+        downloadMedia:
+          mediaRef && session.cloudApiAccessToken
+            ? () =>
+                downloadCloudApiMedia(
+                  mediaRef.id,
+                  session.cloudApiAccessToken!,
+                  mediaRef.mime_type,
+                  (mediaRef as { filename?: string }).filename,
+                )
+            : undefined,
+      },
+    ).catch((err) => console.error("process_inbound_cloud_message_failed", err));
+  }
+}
+
 export async function restartSession(sessionId: string) {
   const sock = activeSockets.get(sessionId);
   if (sock) {
@@ -627,6 +853,15 @@ export async function logoutSession(sessionId: string) {
   if (sock) {
     activeSockets.delete(sessionId);
     await sock.logout().catch(() => {});
+    // Belt and suspenders: `logout()` can fail to fully tear down the transport for a socket
+    // that's already in a broken state (e.g. the "Invalid account signature" conflict this
+    // number hits once it's also registered on the Cloud API) — without this, the socket's own
+    // event listeners (messages.upsert, messaging-history.set, connection.update) can keep
+    // firing and writing to the DB for a session that's supposedly gone.
+    sock.end(undefined);
+    sock.ev.removeAllListeners("connection.update");
+    sock.ev.removeAllListeners("messages.upsert");
+    sock.ev.removeAllListeners("messaging-history.set");
   }
   await fs.rm(sessionDir(sessionId), { recursive: true, force: true }).catch(() => {});
   await prisma.whatsappSession.update({
@@ -640,8 +875,10 @@ export function isSessionActive(sessionId: string) {
 }
 
 export async function startAllPersistedSessions() {
+  // Cloud API sessions have no persistent socket to (re)start — they just sit there and wait
+  // for Meta to call the webhook, so only Baileys sessions go through this.
   const sessions = await prisma.whatsappSession.findMany({
-    where: { status: { not: SessionStatus.LOGGED_OUT }, archivedAt: null },
+    where: { status: { not: SessionStatus.LOGGED_OUT }, archivedAt: null, provider: "BAILEYS" },
   });
   for (const session of sessions) {
     await startSession(session.id).catch((err) => console.error(`start_session_failed:${session.id}`, err));

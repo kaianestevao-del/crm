@@ -110,6 +110,9 @@ export type RealtimeEvent =
 // BullMQ queue names shared between the API (producer) and the worker (consumer).
 export const QUEUE_OUTBOUND_MESSAGES = "outbound-messages";
 export const QUEUE_SESSION_COMMANDS = "session-commands";
+// Raw Meta webhook payloads land here (from the API's public webhook route) so the actual
+// Contact/Conversation/Message writes happen in the worker, same as every other WhatsApp event.
+export const QUEUE_INBOUND_CLOUD_MESSAGES = "inbound-cloud-messages";
 // Producer and consumer both live in the worker process (it's the only one with access to
 // the org's Groq key and the audio files), but the queue name is still shared so the API
 // could enqueue directly in the future without going through the worker's HTTP surface.
@@ -135,6 +138,17 @@ export interface OutboundMessageJob {
   mediaType?: MessageType;
   mediaName?: string;
 }
+
+export interface InboundCloudMessageJob {
+  sessionId: string;
+  organizationId: string;
+  // Raw `entry[].changes[].value` object from Meta's webhook POST — parsed in the worker,
+  // which is also where the Cloud API credentials needed to resolve media live.
+  payload: unknown;
+}
+
+export const WHATSAPP_PROVIDERS = ["BAILEYS", "CLOUD_API"] as const;
+export type WhatsappProvider = (typeof WHATSAPP_PROVIDERS)[number];
 
 export type SessionCommand = "START" | "LOGOUT" | "RESTART" | "RESYNC_LABELS";
 

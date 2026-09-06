@@ -126,6 +126,9 @@ export function InboxPage() {
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingContactName, setEditingContactName] = useState(false);
+  const [contactNameDraft, setContactNameDraft] = useState("");
+  const [savingContactName, setSavingContactName] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -185,6 +188,10 @@ export function InboxPage() {
       socket.off("contact.updated", onContactUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  useEffect(() => {
+    setEditingContactName(false);
   }, [selectedId]);
 
   useEffect(() => {
@@ -253,6 +260,28 @@ export function InboxPage() {
     e.target.value = "";
     if (!file) return;
     await sendAttachmentFile(file);
+  }
+
+  function startEditingContactName() {
+    if (!selectedConversation) return;
+    setContactNameDraft(selectedConversation.contact.name ?? "");
+    setEditingContactName(true);
+  }
+
+  async function saveContactName() {
+    if (!selectedConversation) return;
+    const name = contactNameDraft.trim();
+    if (!name) return;
+    setSavingContactName(true);
+    try {
+      const res = await api.patch(`/contacts/${selectedConversation.contact.id}`, { name });
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selectedConversation.id ? { ...c, contact: { ...c.contact, name: res.data.name } } : c)),
+      );
+      setEditingContactName(false);
+    } finally {
+      setSavingContactName(false);
+    }
   }
 
   async function handleExport() {
@@ -383,7 +412,41 @@ export function InboxPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ContactAvatar contact={selectedConversation.contact} />
-                  <p className="font-medium">{contactLabel(selectedConversation.contact)}</p>
+                  {editingContactName ? (
+                    <>
+                      <input
+                        autoFocus
+                        value={contactNameDraft}
+                        onChange={(e) => setContactNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveContactName();
+                          if (e.key === "Escape") setEditingContactName(false);
+                        }}
+                        className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                      />
+                      <button
+                        onClick={saveContactName}
+                        disabled={savingContactName || !contactNameDraft.trim()}
+                        className="text-xs font-medium text-brand-dark hover:underline disabled:opacity-50"
+                      >
+                        Salvar
+                      </button>
+                      <button onClick={() => setEditingContactName(false)} className="text-xs text-gray-400 hover:underline">
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium">{contactLabel(selectedConversation.contact)}</p>
+                      <button
+                        onClick={startEditingContactName}
+                        title="Editar nome"
+                        className="text-gray-300 hover:text-brand-dark"
+                      >
+                        ✏️
+                      </button>
+                    </>
+                  )}
                 </div>
                 <div className="relative flex gap-2">
                   <button
