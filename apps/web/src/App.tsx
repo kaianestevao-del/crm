@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { RequireModule } from "./components/RequireModule";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -18,11 +19,19 @@ export function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
-            <Route path="/inbox" element={<InboxPage />} />
-            <Route path="/kanban" element={<KanbanPage />} />
-            <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
-            <Route path="/autoatendimento" element={<AutoRepliesPage />} />
-            <Route path="/equipe" element={<TeamPage />} />
+            <Route element={<RequireModule module="inbox" />}>
+              <Route path="/inbox" element={<InboxPage />} />
+            </Route>
+            <Route element={<RequireModule module="kanban" />}>
+              <Route path="/kanban" element={<KanbanPage />} />
+            </Route>
+            <Route element={<RequireModule module="autoatendimento" />}>
+              <Route path="/autoatendimento" element={<AutoRepliesPage />} />
+            </Route>
+            <Route element={<RequireModule ownerOrAdminOnly />}>
+              <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
+              <Route path="/equipe" element={<TeamPage />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/inbox" replace />} />

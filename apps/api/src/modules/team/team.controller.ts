@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { Role } from "@crm/shared";
+import { MODULE_KEYS, Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
@@ -11,13 +11,15 @@ function requireManager(role: Role) {
   }
 }
 
+const moduleKeysSchema = z.array(z.enum(MODULE_KEYS));
+
 export async function listTeam(req: Request, res: Response) {
   const memberships = await prisma.membership.findMany({
     where: { organizationId: req.auth!.organizationId },
     include: { user: { select: { id: true, name: true, email: true } } },
     orderBy: { createdAt: "asc" },
   });
-  res.json(memberships.map((m) => ({ membershipId: m.id, role: m.role, ...m.user })));
+  res.json(memberships.map((m) => ({ membershipId: m.id, role: m.role, allowedModules: m.allowedModules, ...m.user })));
 }
 
 const inviteSchema = z.object({
@@ -25,6 +27,10 @@ const inviteSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   role: z.nativeEnum(Role).default(Role.AGENT),
+  // Only meaningful when role is AGENT — OWNER/ADMIN always have full access. Defaults to every
+  // module (an owner unchecks what they don't want this specific hire seeing) rather than
+  // starting empty.
+  allowedModules: moduleKeysSchema.default([...MODULE_KEYS]),
 });
 
 // There's no email-invite infrastructure — an OWNER/ADMIN creates the teammate's login
@@ -52,7 +58,12 @@ export async function inviteTeamMember(req: Request, res: Response) {
   const result = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash } });
     const membership = await tx.membership.create({
-      data: { userId: user.id, organizationId: auth.organizationId, role: input.role },
+      data: {
+        userId: user.id,
+        organizationId: auth.organizationId,
+        role: input.role,
+        allowedModules: input.role === Role.AGENT ? input.allowedModules : [],
+      },
     });
     return { user, membership };
   });
@@ -60,31 +71,44 @@ export async function inviteTeamMember(req: Request, res: Response) {
   res.status(201).json({
     membershipId: result.membership.id,
     role: result.membership.role,
+    allowedModules: result.membership.allowedModules,
     id: result.user.id,
     name: result.user.name,
     email: result.user.email,
   });
 }
 
-const updateRoleSchema = z.object({ role: z.nativeEnum(Role) });
+const updateSchema = z.object({
+  role: z.nativeEnum(Role).optional(),
+  allowedModules: moduleKeysSchema.optional(),
+});
 
-export async function updateTeamMemberRole(req: Request, res: Response) {
+export async function updateTeamMember(req: Request, res: Response) {
   const auth = req.auth!;
   requireManager(auth.role);
-  const input = updateRoleSchema.parse(req.body);
+  const input = updateSchema.parse(req.body);
 
   const membership = await prisma.membership.findFirst({
     where: { id: req.params.id, organizationId: auth.organizationId },
   });
   if (!membership) throw new HttpError(404, "team_member_not_found");
 
-  if (membership.role === Role.OWNER && input.role !== Role.OWNER) {
+  if (input.role && membership.role === Role.OWNER && input.role !== Role.OWNER) {
     const ownerCount = await prisma.membership.count({ where: { organizationId: auth.organizationId, role: Role.OWNER } });
     if (ownerCount <= 1) throw new HttpError(400, "cannot_demote_last_owner");
   }
 
-  const updated = await prisma.membership.update({ where: { id: membership.id }, data: { role: input.role } });
-  res.json({ membershipId: updated.id, role: updated.role });
+  const nextRole = input.role ?? membership.role;
+  const updated = await prisma.membership.update({
+    where: { id: membership.id },
+    data: {
+      ...(input.role ? { role: input.role } : {}),
+      // Non-AGENT roles never carry restrictions — always full access.
+      ...(input.allowedModules ? { allowedModules: nextRole === Role.AGENT ? input.allowedModules : [] } : {}),
+      ...(input.role && input.role !== Role.AGENT ? { allowedModules: [] } : {}),
+    },
+  });
+  res.json({ membershipId: updated.id, role: updated.role, allowedModules: updated.allowedModules });
 }
 
 // Removes the teammate from THIS organization only (deletes the Membership, never the User) —

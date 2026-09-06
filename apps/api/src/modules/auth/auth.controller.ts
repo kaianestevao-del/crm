@@ -1,17 +1,24 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { Role } from "@crm/shared";
+import { MODULE_KEYS, Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { signJwt } from "../../utils/jwt";
 import { HttpError } from "../../utils/httpError";
 import { registerSchema, loginSchema } from "./auth.schema";
+
+// OWNER/ADMIN always have full access regardless of what's stored — resolving that here means
+// the frontend never has to special-case role when deciding whether to show a module.
+function effectiveAllowedModules(role: Role, storedAllowedModules: string[]): string[] {
+  return role === Role.AGENT ? storedAllowedModules : [...MODULE_KEYS];
+}
 
 function toAuthResponse(
   user: { id: string; name: string; email: string; signatureEnabled: boolean; signatureName: string | null },
   organizationId: string,
   organizationName: string,
   role: Role,
+  allowedModules: string[],
 ) {
   return {
     token: signJwt({ sub: user.id, organizationId, role }),
@@ -22,7 +29,7 @@ function toAuthResponse(
       signatureEnabled: user.signatureEnabled,
       signatureName: user.signatureName,
     },
-    organization: { id: organizationId, name: organizationName, role },
+    organization: { id: organizationId, name: organizationName, role, allowedModules },
   };
 }
 
@@ -64,7 +71,9 @@ export async function register(req: Request, res: Response) {
     return { user, organization, pipeline };
   });
 
-  res.status(201).json(toAuthResponse(result.user, result.organization.id, result.organization.name, Role.OWNER));
+  res.status(201).json(
+    toAuthResponse(result.user, result.organization.id, result.organization.name, Role.OWNER, effectiveAllowedModules(Role.OWNER, [])),
+  );
 }
 
 export async function login(req: Request, res: Response) {
@@ -82,7 +91,10 @@ export async function login(req: Request, res: Response) {
   const membership = user.memberships[0];
   if (!membership) throw new HttpError(403, "no_organization_membership");
 
-  res.json(toAuthResponse(user, membership.organizationId, membership.organization.name, membership.role as Role));
+  const role = membership.role as Role;
+  res.json(
+    toAuthResponse(user, membership.organizationId, membership.organization.name, role, effectiveAllowedModules(role, membership.allowedModules)),
+  );
 }
 
 export async function me(req: Request, res: Response) {
@@ -102,7 +114,12 @@ export async function me(req: Request, res: Response) {
       signatureEnabled: user.signatureEnabled,
       signatureName: user.signatureName,
     },
-    organization: { id: membership.organizationId, name: membership.organization.name, role: membership.role },
+    organization: {
+      id: membership.organizationId,
+      name: membership.organization.name,
+      role: membership.role,
+      allowedModules: effectiveAllowedModules(membership.role as Role, membership.allowedModules),
+    },
   });
 }
 

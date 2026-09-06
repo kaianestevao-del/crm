@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { requireAuth } from "../../middleware/auth";
+import { requireModule } from "../../middleware/requireModule";
 import { listPipelines, createDeal, moveDeal, deleteDeal, exportDeals } from "./pipelines.controller";
 
 export const pipelinesRouter = Router();
 pipelinesRouter.use(requireAuth);
+pipelinesRouter.use(asyncHandler(requireModule("kanban")));
 
 pipelinesRouter.get("/", asyncHandler(listPipelines));
 pipelinesRouter.get("/deals/export", asyncHandler(exportDeals));

@@ -18,6 +18,7 @@ interface Contact {
   id: string;
   name: string | null;
   phoneNumber: string;
+  avatarUrl: string | null;
   tags: Tag[];
   whatsappLabels: WhatsappLabel[];
 }
@@ -45,6 +46,21 @@ interface Message {
 
 function contactLabel(contact: Contact) {
   return contact.name?.trim() || `+${contact.phoneNumber}`;
+}
+
+function ContactAvatar({ contact, size = 36 }: { contact: Contact; size?: number }) {
+  const style = { width: size, height: size };
+  if (contact.avatarUrl) {
+    return <img src={contact.avatarUrl} alt="" style={style} className="flex-shrink-0 rounded-full object-cover" />;
+  }
+  return (
+    <div
+      style={style}
+      className="flex flex-shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand-dark"
+    >
+      {contactLabel(contact).slice(0, 1).toUpperCase()}
+    </div>
+  );
 }
 
 const MEDIA_PREVIEW_LABEL: Partial<Record<MessageType, string>> = {
@@ -339,15 +355,20 @@ export function InboxPage() {
                 selectedId === conversation.id ? "bg-brand/5" : ""
               }`}
             >
-              <div className="flex items-center justify-between">
-                <p className="truncate text-sm font-medium">{contactLabel(conversation.contact)}</p>
-                {conversation.unreadCount > 0 && (
-                  <span className="rounded-full bg-brand-dark px-2 py-0.5 text-xs font-medium text-white">
-                    {conversation.unreadCount}
-                  </span>
-                )}
+              <div className="flex items-center gap-2">
+                <ContactAvatar contact={conversation.contact} size={32} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <p className="truncate text-sm font-medium">{contactLabel(conversation.contact)}</p>
+                    {conversation.unreadCount > 0 && (
+                      <span className="rounded-full bg-brand-dark px-2 py-0.5 text-xs font-medium text-white">
+                        {conversation.unreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-gray-500">{messagePreview(conversation.messages[0])}</p>
+                </div>
               </div>
-              <p className="truncate text-xs text-gray-500">{messagePreview(conversation.messages[0])}</p>
             </button>
           ))}
           {visibleConversations.length === 0 && <p className="p-4 text-sm text-gray-500">Nenhuma conversa ainda.</p>}
@@ -359,7 +380,10 @@ export function InboxPage() {
           <>
             <div className="border-b border-gray-200 bg-white px-4 py-3">
               <div className="flex items-center justify-between">
-                <p className="font-medium">{contactLabel(selectedConversation.contact)}</p>
+                <div className="flex items-center gap-2">
+                  <ContactAvatar contact={selectedConversation.contact} />
+                  <p className="font-medium">{contactLabel(selectedConversation.contact)}</p>
+                </div>
                 <div className="relative flex gap-2">
                   <button
                     onClick={handleExport}

@@ -366,6 +366,21 @@ async function recordMessage(
     create: { organizationId, waJid: jid, phoneNumber, name: fromMe ? undefined : pushName },
   });
 
+  // Fetch the WhatsApp profile photo once, the first time we see this contact — cheap enough
+  // to do inline here since we already have a live socket, and avoids hammering WhatsApp on
+  // every single message for a photo that rarely changes.
+  if (!contact.avatarUrl) {
+    try {
+      const avatarUrl = await sock.profilePictureUrl(jid, "image");
+      if (avatarUrl) {
+        await prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl } });
+        contact.avatarUrl = avatarUrl;
+      }
+    } catch {
+      // No photo set, or privacy settings hide it — leave avatarUrl null.
+    }
+  }
+
   const conversation = await prisma.conversation.upsert({
     where: { whatsappSessionId_contactId: { whatsappSessionId: sessionId, contactId: contact.id } },
     update:

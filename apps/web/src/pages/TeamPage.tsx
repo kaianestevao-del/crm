@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Role } from "@crm/shared";
+import { MODULE_KEYS, MODULE_LABELS, ModuleKey, Role } from "@crm/shared";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -9,6 +9,7 @@ interface TeamMember {
   name: string;
   email: string;
   role: Role;
+  allowedModules: string[];
 }
 
 const roleLabel: Record<Role, string> = {
@@ -16,6 +17,19 @@ const roleLabel: Record<Role, string> = {
   [Role.ADMIN]: "Administrador(a)",
   [Role.AGENT]: "Atendente",
 };
+
+function ModuleCheckboxes({ selected, onToggle }: { selected: Set<string>; onToggle: (key: ModuleKey) => void }) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {MODULE_KEYS.map((key) => (
+        <label key={key} className="flex items-center gap-1.5 text-xs text-gray-700">
+          <input type="checkbox" checked={selected.has(key)} onChange={() => onToggle(key)} />
+          {MODULE_LABELS[key]}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 export function TeamPage() {
   const { user, organization } = useAuth();
@@ -27,8 +41,10 @@ export function TeamPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>(Role.AGENT);
+  const [newAllowedModules, setNewAllowedModules] = useState<Set<string>>(new Set(MODULE_KEYS));
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingAccessFor, setEditingAccessFor] = useState<string | null>(null);
 
   async function refresh() {
     const res = await api.get("/team");
@@ -44,8 +60,18 @@ export function TeamPage() {
     setEmail("");
     setPassword("");
     setRole(Role.AGENT);
+    setNewAllowedModules(new Set(MODULE_KEYS));
     setError(null);
     setShowForm(false);
+  }
+
+  function toggleNewModule(key: ModuleKey) {
+    setNewAllowedModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   async function handleCreate(e: FormEvent) {
@@ -54,7 +80,13 @@ export function TeamPage() {
     setCreating(true);
     setError(null);
     try {
-      await api.post("/team", { name: name.trim(), email: email.trim(), password, role });
+      await api.post("/team", {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        role,
+        allowedModules: Array.from(newAllowedModules),
+      });
       resetForm();
       await refresh();
     } catch (err: any) {
@@ -76,6 +108,20 @@ export function TeamPage() {
     }
   }
 
+  async function handleToggleMemberModule(member: TeamMember, key: ModuleKey) {
+    const nextModules = new Set(member.allowedModules);
+    if (nextModules.has(key)) nextModules.delete(key);
+    else nextModules.add(key);
+    const allowedModules = Array.from(nextModules);
+
+    setMembers((prev) => prev.map((m) => (m.membershipId === member.membershipId ? { ...m, allowedModules } : m)));
+    try {
+      await api.patch(`/team/${member.membershipId}`, { allowedModules });
+    } catch {
+      await refresh();
+    }
+  }
+
   async function handleRemove(membershipId: string) {
     await api.delete(`/team/${membershipId}`);
     await refresh();
@@ -86,39 +132,59 @@ export function TeamPage() {
       <h1 className="mb-1 text-lg font-semibold">Equipe</h1>
       <p className="mb-6 max-w-2xl text-sm text-gray-500">
         Pessoas com acesso a esta organização. Remover alguém da equipe não apaga nada que essa pessoa já fez —
-        mensagens, negócios e anotações continuam com o nome dela.
+        mensagens, negócios e anotações continuam com o nome dela. Dono(a) e Administrador(a) sempre veem tudo;
+        o acesso por área abaixo só se aplica a Atendentes.
       </p>
 
-      <div className="max-w-2xl rounded-lg border border-gray-200 bg-white">
+      <div className="max-w-2xl space-y-2">
         {members.map((member) => (
-          <div key={member.membershipId} className="flex items-center justify-between border-b border-gray-100 px-4 py-3 last:border-b-0">
-            <div>
-              <p className="text-sm font-medium">
-                {member.name} {member.id === user?.id && <span className="text-xs text-gray-400">(você)</span>}
-              </p>
-              <p className="text-xs text-gray-500">{member.email}</p>
-            </div>
-            {canManage && member.id !== user?.id ? (
-              <div className="flex items-center gap-3">
-                <select
-                  value={member.role}
-                  onChange={(e) => handleRoleChange(member.membershipId, e.target.value as Role)}
-                  className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
-                >
-                  <option value={Role.AGENT}>Atendente</option>
-                  <option value={Role.ADMIN}>Administrador(a)</option>
-                  <option value={Role.OWNER}>Dono(a)</option>
-                </select>
-                <button onClick={() => handleRemove(member.membershipId)} className="text-xs font-medium text-red-600 hover:underline">
-                  Remover
-                </button>
+          <div key={member.membershipId} className="rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">
+                  {member.name} {member.id === user?.id && <span className="text-xs text-gray-400">(você)</span>}
+                </p>
+                <p className="text-xs text-gray-500">{member.email}</p>
               </div>
-            ) : (
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{roleLabel[member.role]}</span>
+              {canManage && member.id !== user?.id ? (
+                <div className="flex items-center gap-3">
+                  <select
+                    value={member.role}
+                    onChange={(e) => handleRoleChange(member.membershipId, e.target.value as Role)}
+                    className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                  >
+                    <option value={Role.AGENT}>Atendente</option>
+                    <option value={Role.ADMIN}>Administrador(a)</option>
+                    <option value={Role.OWNER}>Dono(a)</option>
+                  </select>
+                  {member.role === Role.AGENT && (
+                    <button
+                      onClick={() => setEditingAccessFor((v) => (v === member.membershipId ? null : member.membershipId))}
+                      className="text-xs font-medium text-brand-dark hover:underline"
+                    >
+                      Acesso
+                    </button>
+                  )}
+                  <button onClick={() => handleRemove(member.membershipId)} className="text-xs font-medium text-red-600 hover:underline">
+                    Remover
+                  </button>
+                </div>
+              ) : (
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{roleLabel[member.role]}</span>
+              )}
+            </div>
+            {member.role === Role.AGENT && editingAccessFor === member.membershipId && (
+              <div className="mt-3 border-t border-gray-100 pt-3">
+                <p className="mb-2 text-xs font-medium text-gray-600">Pode acessar:</p>
+                <ModuleCheckboxes
+                  selected={new Set(member.allowedModules)}
+                  onToggle={(key) => handleToggleMemberModule(member, key)}
+                />
+              </div>
             )}
           </div>
         ))}
-        {members.length === 0 && <p className="p-4 text-sm text-gray-400">Nenhum membro encontrado.</p>}
+        {members.length === 0 && <p className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-400">Nenhum membro encontrado.</p>}
       </div>
 
       {canManage && (
@@ -154,6 +220,12 @@ export function TeamPage() {
                 <option value={Role.AGENT}>Atendente</option>
                 <option value={Role.ADMIN}>Administrador(a)</option>
               </select>
+              {role === Role.AGENT && (
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-600">Pode acessar:</p>
+                  <ModuleCheckboxes selected={newAllowedModules} onToggle={toggleNewModule} />
+                </div>
+              )}
               {error && <p className="text-xs text-red-600">{error}</p>}
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={resetForm} className="rounded-md px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">

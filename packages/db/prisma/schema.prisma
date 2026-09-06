@@ -107,6 +107,11 @@ model Membership {
   role           Role     @default(AGENT)
   createdAt      DateTime @default(now())
 
+  // Only meaningful for AGENT — OWNER/ADMIN always have full access regardless of this list.
+  // One flat on/off switch per module key (see MODULE_KEYS in @crm/shared), no separate
+  // view/edit distinction.
+  allowedModules String[] @default([])
+
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organizationId String

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { requireAuth } from "../../middleware/auth";
+import { requireModule } from "../../middleware/requireModule";
 import { uploadMessageAttachment } from "../../upload";
 import {
   listConversations,
@@ -15,6 +16,7 @@ import {
 
 export const conversationsRouter = Router();
 conversationsRouter.use(requireAuth);
+conversationsRouter.use(asyncHandler(requireModule("inbox")));
 
 conversationsRouter.get("/", asyncHandler(listConversations));
 conversationsRouter.post("/start", asyncHandler(startConversation));

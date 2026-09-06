@@ -15,6 +15,7 @@ interface AuthOrganization {
   id: string;
   name: string;
   role: Role;
+  allowedModules: string[];
 }
 
 interface AuthContextValue {
