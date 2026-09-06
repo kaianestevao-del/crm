@@ -264,6 +264,11 @@ export function ConnectWhatsappPage() {
     await api.post(`/whatsapp-sessions/${id}/resync-labels`);
   }
 
+  async function handleRefreshPhoneNumber(id: string) {
+    const res = await api.post(`/whatsapp-sessions/${id}/refresh-phone-number`);
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, phoneNumber: res.data.phoneNumber } : s)));
+  }
+
   async function handleDelete(id: string) {
     await api.delete(`/whatsapp-sessions/${id}`);
     setConfirmDeleteFor(null);
@@ -421,13 +426,22 @@ export function ConnectWhatsappPage() {
               <button onClick={() => handleLogout(session.id)} className="text-xs font-medium text-red-600 hover:underline">
                 Desconectar
               </button>
-              {session.phoneNumber && (
+              {session.phoneNumber ? (
                 <button
                   onClick={() => setLinkGeneratorFor((v) => (v === session.id ? null : session.id))}
                   className="text-xs font-medium text-brand-dark hover:underline"
                 >
                   🔗 Links personalizados
                 </button>
+              ) : (
+                session.provider === "CLOUD_API" && (
+                  <button
+                    onClick={() => handleRefreshPhoneNumber(session.id)}
+                    className="text-xs font-medium text-brand-dark hover:underline"
+                  >
+                    🔄 Buscar número (para gerar links)
+                  </button>
+                )
               )}
               {session.provider === "BAILEYS" && session.status === SessionStatus.CONNECTED && (
                 <button onClick={() => handleResyncLabels(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
