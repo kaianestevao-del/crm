@@ -8,7 +8,7 @@ interface RecentPayment {
   contactName: string | null;
   phoneNumber: string;
   stageName: string;
-  daysInStage: number;
+  daysInStage: number | null;
 }
 
 interface Cohort {
@@ -170,7 +170,9 @@ export function DashboardPage() {
                         <span className="block text-xs text-gray-400">{dateFormatter.format(new Date(p.paidAt))}</span>
                       </td>
                       <td className="px-4 py-2 text-gray-600">{p.stageName}</td>
-                      <td className="px-4 py-2 text-gray-600">{Math.max(0, Math.round(p.daysInStage))}d</td>
+                      <td className="px-4 py-2 text-gray-600">
+                        {p.daysInStage == null ? "—" : `${Math.max(0, Math.round(p.daysInStage))}d`}
+                      </td>
                       <td className="px-4 py-2 font-medium text-brand-dark">{currencyFormatter.format(p.value)}</td>
                     </tr>
                   ))}

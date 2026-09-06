@@ -142,9 +142,14 @@ async function getFirstPaymentStats(organizationId: string) {
   };
 }
 
+// LEFT JOINs against DealStageHistory on purpose: a deal created by a bulk import (Deal.createdAt
+// = import time) whose payment.paidAt is a real historical date has no stage-history row covering
+// that instant (the only row starts at import time, after the payment) — an INNER JOIN there would
+// silently drop that payment from the list instead of just missing its "days in stage" detail.
+// Falls back to the deal's current stage name so every payment still shows up.
 async function getRecentPayments(organizationId: string) {
   return prisma.$queryRaw<
-    { id: string; paidAt: Date; value: number; contactName: string | null; phoneNumber: string; stageName: string; daysInStage: number }[]
+    { id: string; paidAt: Date; value: number; contactName: string | null; phoneNumber: string; stageName: string; daysInStage: number | null }[]
   >`
     SELECT
       dp.id,
@@ -152,14 +157,15 @@ async function getRecentPayments(organizationId: string) {
       dp.value,
       c.name AS "contactName",
       c."phoneNumber",
-      ps.name AS "stageName",
+      COALESCE(ps_time.name, ps_current.name) AS "stageName",
       EXTRACT(EPOCH FROM (dp."paidAt" - dsh."enteredAt")) / 86400.0 AS "daysInStage"
     FROM "DealPayment" dp
     JOIN "Deal" d ON d.id = dp."dealId"
     JOIN "Contact" c ON c.id = d."contactId"
-    JOIN "DealStageHistory" dsh ON dsh."dealId" = d.id
+    LEFT JOIN "DealStageHistory" dsh ON dsh."dealId" = d.id
       AND dsh."enteredAt" <= dp."paidAt" AND (dsh."exitedAt" IS NULL OR dsh."exitedAt" > dp."paidAt")
-    JOIN "PipelineStage" ps ON ps.id = dsh."stageId"
+    LEFT JOIN "PipelineStage" ps_time ON ps_time.id = dsh."stageId"
+    JOIN "PipelineStage" ps_current ON ps_current.id = d."stageId"
     WHERE d."organizationId" = ${organizationId}
     ORDER BY dp."paidAt" DESC
     LIMIT 20
