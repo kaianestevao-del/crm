@@ -12,6 +12,7 @@ import {
   setContactDealStage,
   addDealPayment,
   deleteDealPayment,
+  updatePipelineStageRole,
 } from "./pipelines.controller";
 
 export const pipelinesRouter = Router();
@@ -27,3 +28,4 @@ pipelinesRouter.get("/contacts/:contactId/deal", asyncHandler(getContactDeal));
 pipelinesRouter.put("/contacts/:contactId/deal-stage", asyncHandler(setContactDealStage));
 pipelinesRouter.post("/contacts/:contactId/deal-payments", asyncHandler(addDealPayment));
 pipelinesRouter.delete("/deals/payments/:paymentId", asyncHandler(deleteDealPayment));
+pipelinesRouter.patch("/stages/:id", asyncHandler(updatePipelineStageRole));

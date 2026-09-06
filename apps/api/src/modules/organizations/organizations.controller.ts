@@ -11,12 +11,14 @@ export async function getMyOrganization(req: Request, res: Response) {
     name: org.name,
     hasGroqApiKey: !!org.groqApiKey,
     autoTaggingEnabled: org.autoTaggingEnabled,
+    followUpMessageTarget: org.followUpMessageTarget,
   });
 }
 
 const updateSchema = z.object({
   groqApiKey: z.string().nullable().optional(),
   autoTaggingEnabled: z.boolean().optional(),
+  followUpMessageTarget: z.number().int().min(1).optional(),
 });
 
 export async function updateMyOrganization(req: Request, res: Response) {
@@ -30,6 +32,7 @@ export async function updateMyOrganization(req: Request, res: Response) {
     data: {
       ...(input.groqApiKey !== undefined ? { groqApiKey: input.groqApiKey?.trim() || null } : {}),
       ...(input.autoTaggingEnabled !== undefined ? { autoTaggingEnabled: input.autoTaggingEnabled } : {}),
+      ...(input.followUpMessageTarget !== undefined ? { followUpMessageTarget: input.followUpMessageTarget } : {}),
     },
   });
   res.json({
@@ -37,5 +40,6 @@ export async function updateMyOrganization(req: Request, res: Response) {
     name: org.name,
     hasGroqApiKey: !!org.groqApiKey,
     autoTaggingEnabled: org.autoTaggingEnabled,
+    followUpMessageTarget: org.followUpMessageTarget,
   });
 }

@@ -64,6 +64,10 @@ model Organization {
   // Whisper-compatible endpoint. Null/empty disables transcription for the org.
   groqApiKey String?
 
+  // Dashboard: how many follow-up messages count as "completing" the follow-up sequence for
+  // a lead — shown as "X de N" on deals sitting in a FOLLOW_UP-role stage.
+  followUpMessageTarget Int @default(13)
+
   // Autoatendimento: NOT an auto-reply — a keyword found in an inbound message links that
   // contact to one or more existing Abas (Tags), e.g. to record which ad/story/bio link a
   // lead came in from. See AutoTagRule below. Never sends anything to the customer.
@@ -396,16 +400,27 @@ model Pipeline {
   @@index([organizationId])
 }
 
+// What a stage means for dashboard metrics, independent of its display name (which each org
+// can set freely) — set by the org owner in Configurações, defaults to unset (null).
+enum PipelineStageRole {
+  FOLLOW_UP
+  UNFOLLOW
+  ACTIVE_PATIENT
+  LOST_PATIENT
+}
+
 model PipelineStage {
-  id    String @id @default(cuid())
+  id    String             @id @default(cuid())
   name  String
   order Int
   color String?
+  role  PipelineStageRole?
 
   pipelineId String
   pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
 
-  deals Deal[]
+  deals        Deal[]
+  stageHistory DealStageHistory[]
 
   @@index([pipelineId])
 }
@@ -432,7 +447,8 @@ model Deal {
   assignedUserId String?
   assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
 
-  payments DealPayment[]
+  payments     DealPayment[]
+  stageHistory DealStageHistory[]
 
   @@index([organizationId])
   @@index([stageId])
@@ -451,5 +467,24 @@ model DealPayment {
   deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
   @@index([dealId])
+}
+
+// One row per continuous period a Deal spent in a given stage — powers the Dashboard's
+// time-in-stage and follow-up metrics. exitedAt = null means "this is the deal's current
+// stage" (at most one open row per deal at a time).
+model DealStageHistory {
+  id        String    @id @default(cuid())
+  enteredAt DateTime  @default(now())
+  exitedAt  DateTime?
+
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  stageId String
+  stage   PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@index([stageId])
+  @@index([dealId, exitedAt])
 }
 

@@ -24,6 +24,7 @@ interface Deal {
   order: number;
   stageId: string;
   contact: Contact;
+  followUpProgress: { sent: number; target: number } | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -185,6 +186,11 @@ export function KanbanPage() {
                                 <span className="text-gray-400"> · {deal.payments.length} lançamentos</span>
                               )}
                             </p>
+                            {deal.followUpProgress && (
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                🔁 {deal.followUpProgress.sent} de {deal.followUpProgress.target}
+                              </p>
+                            )}
                             <button
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={() => navigate("/inbox", { state: { contactId: deal.contact.id } })}

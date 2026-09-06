@@ -6,10 +6,12 @@ import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { InboxPage } from "./pages/InboxPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { KanbanPage } from "./pages/KanbanPage";
 import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
 import { AutoRepliesPage } from "./pages/AutoRepliesPage";
 import { TeamPage } from "./pages/TeamPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
   return (
@@ -22,6 +24,9 @@ export function App() {
             <Route element={<RequireModule module="inbox" />}>
               <Route path="/inbox" element={<InboxPage />} />
             </Route>
+            <Route element={<RequireModule module="dashboard" />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+            </Route>
             <Route element={<RequireModule module="kanban" />}>
               <Route path="/kanban" element={<KanbanPage />} />
             </Route>
@@ -31,6 +36,7 @@ export function App() {
             <Route element={<RequireModule ownerOrAdminOnly />}>
               <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
               <Route path="/equipe" element={<TeamPage />} />
+              <Route path="/configuracoes" element={<SettingsPage />} />
             </Route>
           </Route>
         </Route>

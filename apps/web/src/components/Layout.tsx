@@ -4,10 +4,12 @@ import { useAuth } from "../context/AuthContext";
 
 const navItems: { to: string; label: string; module?: ModuleKey; ownerOrAdminOnly?: boolean }[] = [
   { to: "/inbox", label: "Caixa de Entrada", module: "inbox" },
+  { to: "/dashboard", label: "Dashboard", module: "dashboard" },
   { to: "/kanban", label: "Funil", module: "kanban" },
   { to: "/autoatendimento", label: "Autoatendimento", module: "autoatendimento" },
   { to: "/whatsapp", label: "Conexão WhatsApp", ownerOrAdminOnly: true },
   { to: "/equipe", label: "Equipe", ownerOrAdminOnly: true },
+  { to: "/configuracoes", label: "Configurações", ownerOrAdminOnly: true },
 ];
 
 export function Layout() {

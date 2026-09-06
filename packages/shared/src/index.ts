@@ -7,13 +7,25 @@ export enum Role {
 // Per-Agent module access. OWNER/ADMIN always see every module regardless of this list — it
 // only ever restricts AGENT accounts, one on/off switch per module (no separate view/edit
 // distinction, by request).
-export const MODULE_KEYS = ["inbox", "kanban", "autoatendimento"] as const;
+export const MODULE_KEYS = ["inbox", "dashboard", "kanban", "autoatendimento"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export const MODULE_LABELS: Record<ModuleKey, string> = {
   inbox: "Caixa de Entrada",
+  dashboard: "Dashboard",
   kanban: "Funil",
   autoatendimento: "Autoatendimento",
+};
+
+// What a pipeline stage means for Dashboard metrics, independent of its display name (each
+// org names its own stages) — assigned by the owner in Configurações.
+export const PIPELINE_STAGE_ROLES = ["FOLLOW_UP", "UNFOLLOW", "ACTIVE_PATIENT", "LOST_PATIENT"] as const;
+export type PipelineStageRole = (typeof PIPELINE_STAGE_ROLES)[number];
+export const PIPELINE_STAGE_ROLE_LABELS: Record<PipelineStageRole, string> = {
+  FOLLOW_UP: "Follow-up",
+  UNFOLLOW: "Perdido (Unfollow)",
+  ACTIVE_PATIENT: "Paciente Ativa",
+  LOST_PATIENT: "Paciente Vencida",
 };
 
 // What a Deal's value refers to — set together with the value itself, from the conversation.

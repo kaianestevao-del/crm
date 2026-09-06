@@ -1,13 +1,69 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import ExcelJS from "exceljs";
-import { PLAN_TYPES, PLAN_TYPE_LABELS, PlanType } from "@crm/shared";
+import { Prisma } from "@crm/db";
+import { PLAN_TYPES, PLAN_TYPE_LABELS, PlanType, PIPELINE_STAGE_ROLES, Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
+type Tx = Prisma.TransactionClient;
+
+// Every place that creates or moves a Deal goes through these two helpers so
+// DealStageHistory always reflects reality — the Dashboard's stage-dwell-time and
+// follow-up metrics have nothing to compute from otherwise.
+async function createDealWithHistory(tx: Tx, data: Prisma.DealCreateInput) {
+  const deal = await tx.deal.create({ data });
+  await tx.dealStageHistory.create({
+    data: { dealId: deal.id, stageId: deal.stageId, enteredAt: deal.createdAt },
+  });
+  return deal;
+}
+
+async function transitionDealStage(tx: Tx, dealId: string, fromStageId: string, toStageId: string) {
+  if (fromStageId === toStageId) return;
+  const now = new Date();
+  await tx.dealStageHistory.updateMany({
+    where: { dealId, stageId: fromStageId, exitedAt: null },
+    data: { exitedAt: now },
+  });
+  await tx.dealStageHistory.create({ data: { dealId, stageId: toStageId, enteredAt: now } });
+}
+
+// Attaches `followUpProgress` (outbound messages sent since the deal's current stage began,
+// out of the org's configured target) to every deal currently sitting in a FOLLOW_UP-role
+// stage. Deals not in such a stage get `null`.
+async function attachFollowUpProgress(
+  organizationId: string,
+  deals: { id: string; stage?: { role: string | null } | null }[],
+) {
+  const followUpDealIds = deals.filter((d) => d.stage?.role === "FOLLOW_UP").map((d) => d.id);
+  const progress = new Map<string, { sent: number; target: number }>();
+  if (followUpDealIds.length === 0) return progress;
+
+  const org = await prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { followUpMessageTarget: true },
+  });
+  const rows = await prisma.$queryRaw<{ dealId: string; sent: bigint }[]>`
+    SELECT d.id AS "dealId", COUNT(m.id) AS sent
+    FROM "Deal" d
+    JOIN "DealStageHistory" dsh ON dsh."dealId" = d.id AND dsh."exitedAt" IS NULL
+    JOIN "Conversation" conv ON conv."contactId" = d."contactId" AND conv."organizationId" = d."organizationId"
+    LEFT JOIN "Message" m ON m."conversationId" = conv.id
+      AND m.direction = 'OUTBOUND' AND m."createdAt" >= dsh."enteredAt"
+    WHERE d.id = ANY(${followUpDealIds}::text[])
+    GROUP BY d.id
+  `;
+  for (const row of rows) {
+    progress.set(row.dealId, { sent: Number(row.sent), target: org.followUpMessageTarget });
+  }
+  return progress;
+}
+
 export async function listPipelines(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
   const pipelines = await prisma.pipeline.findMany({
-    where: { organizationId: req.auth!.organizationId },
+    where: { organizationId },
     include: {
       stages: {
         orderBy: { order: "asc" },
@@ -18,6 +74,7 @@ export async function listPipelines(req: Request, res: Response) {
               contact: true,
               assignedUser: { select: { id: true, name: true } },
               payments: { orderBy: { paidAt: "asc" } },
+              stage: { select: { role: true } },
             },
           },
         },
@@ -25,7 +82,17 @@ export async function listPipelines(req: Request, res: Response) {
     },
     orderBy: { createdAt: "asc" },
   });
-  res.json(pipelines);
+
+  const allDeals = pipelines.flatMap((p) => p.stages.flatMap((s) => s.deals));
+  const progress = await attachFollowUpProgress(organizationId, allDeals);
+  const withProgress = pipelines.map((p) => ({
+    ...p,
+    stages: p.stages.map((s) => ({
+      ...s,
+      deals: s.deals.map((d) => ({ ...d, followUpProgress: progress.get(d.id) ?? null })),
+    })),
+  }));
+  res.json(withProgress);
 }
 
 const createDealSchema = z.object({
@@ -48,16 +115,16 @@ export async function createDeal(req: Request, res: Response) {
 
   const lastDeal = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
 
-  const deal = await prisma.deal.create({
-    data: {
-      organizationId,
-      pipelineId: pipeline.id,
-      stageId: stage.id,
-      contactId: contact.id,
+  const deal = await prisma.$transaction((tx) =>
+    createDealWithHistory(tx, {
+      organization: { connect: { id: organizationId } },
+      pipeline: { connect: { id: pipeline.id } },
+      stage: { connect: { id: stage.id } },
+      contact: { connect: { id: contact.id } },
       title: input.title,
       order: (lastDeal?.order ?? -1) + 1,
-    },
-  });
+    }),
+  );
   res.status(201).json(deal);
 }
 
@@ -86,6 +153,7 @@ export async function moveDeal(req: Request, res: Response) {
       where: { id: deal.id },
       data: { stageId: input.stageId, order: input.order },
     });
+    await transitionDealStage(tx, deal.id, deal.stageId, input.stageId);
   });
 
   const updated = await prisma.deal.findUniqueOrThrow({ where: { id: deal.id } });
@@ -106,10 +174,13 @@ export async function getContactDeal(req: Request, res: Response) {
     select: {
       id: true,
       stageId: true,
+      stage: { select: { role: true } },
       payments: { orderBy: { paidAt: "asc" }, select: { id: true, value: true, planType: true, paidAt: true } },
     },
   });
-  res.json(deal);
+  if (!deal) return res.json(deal);
+  const progress = await attachFollowUpProgress(organizationId, [deal]);
+  res.json({ ...deal, followUpProgress: progress.get(deal.id) ?? null });
 }
 
 async function findOrCreateCurrentDeal(organizationId: string, contactId: string, stageId?: string) {
@@ -129,18 +200,19 @@ async function findOrCreateCurrentDeal(organizationId: string, contactId: string
     stage = await prisma.pipelineStage.findFirst({ where: { pipelineId: pipeline.id }, orderBy: { order: "asc" } });
   }
   if (!stage) throw new HttpError(400, "pipeline_has_no_stages");
+  const resolvedStage = stage;
 
-  const lastInStage = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
-  return prisma.deal.create({
-    data: {
-      organizationId,
-      pipelineId: stage.pipelineId,
-      stageId: stage.id,
-      contactId: contact.id,
+  const lastInStage = await prisma.deal.findFirst({ where: { stageId: resolvedStage.id }, orderBy: { order: "desc" } });
+  return prisma.$transaction((tx) =>
+    createDealWithHistory(tx, {
+      organization: { connect: { id: organizationId } },
+      pipeline: { connect: { id: resolvedStage.pipelineId } },
+      stage: { connect: { id: resolvedStage.id } },
+      contact: { connect: { id: contact.id } },
       title: contact.name?.trim() || `+${contact.phoneNumber}`,
       order: (lastInStage?.order ?? -1) + 1,
-    },
-  });
+    }),
+  );
 }
 
 const setContactDealStageSchema = z.object({ stageId: z.string() });
@@ -163,9 +235,13 @@ export async function setContactDealStage(req: Request, res: Response) {
   if (existingDeal) {
     if (existingDeal.stageId === stage.id) return res.json(existingDeal);
     const lastInStage = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
-    const updated = await prisma.deal.update({
-      where: { id: existingDeal.id },
-      data: { pipelineId: stage.pipelineId, stageId: stage.id, order: (lastInStage?.order ?? -1) + 1 },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.deal.update({
+        where: { id: existingDeal.id },
+        data: { pipelineId: stage.pipelineId, stageId: stage.id, order: (lastInStage?.order ?? -1) + 1 },
+      });
+      await transitionDealStage(tx, existingDeal.id, existingDeal.stageId, stage.id);
+      return result;
     });
     return res.json(updated);
   }
@@ -173,17 +249,40 @@ export async function setContactDealStage(req: Request, res: Response) {
   // No deal yet for this contact — picking a stage from the conversation creates one, titled
   // with the contact's own name so it shows up sensibly on the Kanban board right away.
   const lastInStage = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
-  const created = await prisma.deal.create({
-    data: {
-      organizationId,
-      pipelineId: stage.pipelineId,
-      stageId: stage.id,
-      contactId: contact.id,
+  const created = await prisma.$transaction((tx) =>
+    createDealWithHistory(tx, {
+      organization: { connect: { id: organizationId } },
+      pipeline: { connect: { id: stage.pipelineId } },
+      stage: { connect: { id: stage.id } },
+      contact: { connect: { id: contact.id } },
       title: contact.name?.trim() || `+${contact.phoneNumber}`,
       order: (lastInStage?.order ?? -1) + 1,
-    },
-  });
+    }),
+  );
   res.status(201).json(created);
+}
+
+const updatePipelineStageRoleSchema = z.object({
+  role: z.enum(PIPELINE_STAGE_ROLES).nullable(),
+});
+
+export async function updatePipelineStageRole(req: Request, res: Response) {
+  const auth = req.auth!;
+  if (auth.role !== Role.OWNER && auth.role !== Role.ADMIN) {
+    throw new HttpError(403, "only_owner_or_admin_can_change_this");
+  }
+  const input = updatePipelineStageRoleSchema.parse(req.body);
+
+  const stage = await prisma.pipelineStage.findFirst({
+    where: { id: req.params.id, pipeline: { organizationId: auth.organizationId } },
+  });
+  if (!stage) throw new HttpError(404, "stage_not_found");
+
+  const updated = await prisma.pipelineStage.update({
+    where: { id: stage.id },
+    data: { role: input.role },
+  });
+  res.json(updated);
 }
 
 const addDealPaymentSchema = z.object({

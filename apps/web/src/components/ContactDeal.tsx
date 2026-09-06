@@ -19,6 +19,7 @@ interface Deal {
   id: string;
   stageId: string;
   payments: Payment[];
+  followUpProgress: { sent: number; target: number } | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -55,9 +56,9 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   }, [contactId]);
 
   async function handleStageChange(stageId: string) {
-    setDeal((prev) => (prev ? { ...prev, stageId } : { id: "", stageId, payments: [] }));
-    const res = await api.put(`/pipelines/contacts/${contactId}/deal-stage`, { stageId });
-    setDeal((prev) => ({ ...(prev ?? { id: res.data.id, stageId: res.data.stageId, payments: [] }), stageId: res.data.stageId }));
+    setDeal((prev) => (prev ? { ...prev, stageId } : prev));
+    await api.put(`/pipelines/contacts/${contactId}/deal-stage`, { stageId });
+    await refresh();
   }
 
   function openPanel() {
@@ -71,11 +72,11 @@ export function ContactDeal({ contactId }: { contactId: string }) {
     if (Number.isNaN(value) || value <= 0) return;
     setSaving(true);
     try {
-      const res = await api.post(`/pipelines/contacts/${contactId}/deal-payments`, {
+      await api.post(`/pipelines/contacts/${contactId}/deal-payments`, {
         value,
         planType: planTypeInput || null,
       });
-      setDeal({ id: res.data.id, stageId: res.data.stageId, payments: res.data.payments });
+      await refresh();
       setValueInput("");
       setPlanTypeInput("");
     } finally {
@@ -84,8 +85,8 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   }
 
   async function handleDeletePayment(paymentId: string) {
-    const res = await api.delete(`/pipelines/deals/payments/${paymentId}`);
-    setDeal((prev) => (prev ? { ...prev, payments: res.data.payments } : prev));
+    await api.delete(`/pipelines/deals/payments/${paymentId}`);
+    await refresh();
   }
 
   if (!loaded || stages.length === 0) return null;
@@ -111,6 +112,15 @@ export function ContactDeal({ contactId }: { contactId: string }) {
           </option>
         ))}
       </select>
+
+      {deal?.followUpProgress && (
+        <span
+          title="Mensagens enviadas nesta etapa de follow-up"
+          className="rounded-full border border-dashed border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-500"
+        >
+          🔁 {deal.followUpProgress.sent} de {deal.followUpProgress.target}
+        </span>
+      )}
 
       <div className="relative">
         <button

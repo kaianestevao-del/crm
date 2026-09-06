@@ -19,6 +19,7 @@ import { whatsappLabelsRouter } from "./modules/whatsapp-labels/whatsapp-labels.
 import { scheduledMessagesRouter } from "./modules/scheduled-messages/scheduled-messages.routes";
 import { autoTagRulesRouter } from "./modules/auto-tag-rules/auto-tag-rules.routes";
 import { teamRouter } from "./modules/team/team.routes";
+import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
@@ -40,6 +41,7 @@ app.use("/whatsapp-labels", whatsappLabelsRouter);
 app.use(scheduledMessagesRouter);
 app.use("/auto-tag-rules", autoTagRulesRouter);
 app.use("/team", teamRouter);
+app.use("/dashboard", dashboardRouter);
 
 app.use(errorHandler);
 
