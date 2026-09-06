@@ -16,6 +16,30 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   autoatendimento: "Autoatendimento",
 };
 
+// What a Deal's value refers to — set together with the value itself, from the conversation.
+export const PLAN_TYPES = [
+  "MENSAL",
+  "TRIMESTRAL",
+  "SEMESTRAL",
+  "ANUAL",
+  "DESAFIO_7",
+  "DESAFIO_14",
+  "DESAFIO_21",
+  "DESAFIO_30",
+] as const;
+export type PlanType = (typeof PLAN_TYPES)[number];
+
+export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
+  MENSAL: "Mensal",
+  TRIMESTRAL: "Trimestral",
+  SEMESTRAL: "Semestral",
+  ANUAL: "Anual",
+  DESAFIO_7: "Desafio de 7 dias",
+  DESAFIO_14: "Desafio de 14 dias",
+  DESAFIO_21: "Desafio de 21 dias",
+  DESAFIO_30: "Desafio de 30 dias",
+};
+
 export enum SessionStatus {
   PENDING = "PENDING",
   CONNECTED = "CONNECTED",

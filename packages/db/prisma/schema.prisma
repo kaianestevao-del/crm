@@ -413,7 +413,6 @@ model PipelineStage {
 model Deal {
   id        String   @id @default(cuid())
   title     String
-  value     Float?
   order     Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -433,7 +432,24 @@ model Deal {
   assignedUserId String?
   assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
 
+  payments DealPayment[]
+
   @@index([organizationId])
   @@index([stageId])
+}
+
+// One row per value the patient has paid — a deal can have several over time
+// (e.g. renews monthly), so the Kanban card and conversation show the running
+// total plus each individual entry rather than a single overwritable value.
+model DealPayment {
+  id       String   @id @default(cuid())
+  value    Float
+  planType String?
+  paidAt   DateTime @default(now())
+
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
 }
 

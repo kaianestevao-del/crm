@@ -8,8 +8,10 @@ import {
   moveDeal,
   deleteDeal,
   exportDeals,
-  getContactDealStage,
+  getContactDeal,
   setContactDealStage,
+  addDealPayment,
+  deleteDealPayment,
 } from "./pipelines.controller";
 
 export const pipelinesRouter = Router();
@@ -21,5 +23,7 @@ pipelinesRouter.get("/deals/export", asyncHandler(exportDeals));
 pipelinesRouter.post("/deals", asyncHandler(createDeal));
 pipelinesRouter.patch("/deals/:id/move", asyncHandler(moveDeal));
 pipelinesRouter.delete("/deals/:id", asyncHandler(deleteDeal));
-pipelinesRouter.get("/contacts/:contactId/deal", asyncHandler(getContactDealStage));
+pipelinesRouter.get("/contacts/:contactId/deal", asyncHandler(getContactDeal));
 pipelinesRouter.put("/contacts/:contactId/deal-stage", asyncHandler(setContactDealStage));
+pipelinesRouter.post("/contacts/:contactId/deal-payments", asyncHandler(addDealPayment));
+pipelinesRouter.delete("/deals/payments/:paymentId", asyncHandler(deleteDealPayment));

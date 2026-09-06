@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
+import { PlanType } from "@crm/shared";
 import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
 
@@ -9,14 +11,22 @@ interface Contact {
   phoneNumber: string;
 }
 
+interface Payment {
+  id: string;
+  value: number;
+  planType: PlanType | null;
+}
+
 interface Deal {
   id: string;
   title: string;
-  value: number | null;
+  payments: Payment[];
   order: number;
   stageId: string;
   contact: Contact;
 }
+
+const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 interface Stage {
   id: string;
@@ -32,6 +42,7 @@ interface Pipeline {
 }
 
 export function KanbanPage() {
+  const navigate = useNavigate();
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -155,7 +166,9 @@ export function KanbanPage() {
                     {stage.name} <span className="text-gray-400">({stage.deals.length})</span>
                   </p>
                   <div className="flex-1 space-y-2">
-                    {stage.deals.map((deal, index) => (
+                    {stage.deals.map((deal, index) => {
+                      const totalValue = deal.payments.reduce((sum, p) => sum + p.value, 0);
+                      return (
                       <Draggable draggableId={deal.id} index={index} key={deal.id}>
                         {(dragProvided) => (
                           <div
@@ -164,13 +177,26 @@ export function KanbanPage() {
                             {...dragProvided.dragHandleProps}
                             className="rounded-md border border-gray-200 bg-white p-3 shadow-sm"
                           >
-                            <p className="text-sm font-medium">{deal.title}</p>
-                            <p className="text-xs text-gray-500">{deal.contact.name?.trim() || `+${deal.contact.phoneNumber}`}</p>
-                            {deal.value != null && <p className="mt-1 text-xs font-medium text-brand-dark">R$ {deal.value}</p>}
+                            <p className="text-sm font-medium">{deal.contact.name?.trim() || `+${deal.contact.phoneNumber}`}</p>
+                            <p className="text-xs text-gray-500">+{deal.contact.phoneNumber}</p>
+                            <p className="mt-1 text-xs font-medium text-brand-dark">
+                              {currencyFormatter.format(totalValue)}
+                              {deal.payments.length > 1 && (
+                                <span className="text-gray-400"> · {deal.payments.length} lançamentos</span>
+                              )}
+                            </p>
+                            <button
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => navigate("/inbox", { state: { contactId: deal.contact.id } })}
+                              className="mt-2 text-xs font-medium text-brand-dark hover:underline"
+                            >
+                              💬 Ir para Caixa de Entrada
+                            </button>
                           </div>
                         )}
                       </Draggable>
-                    ))}
+                      );
+                    })}
                     {provided.placeholder}
                   </div>
                 </div>

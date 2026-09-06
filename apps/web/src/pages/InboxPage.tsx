@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { MessageDirection, MessageType } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
@@ -6,7 +7,7 @@ import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
 import { ContactWhatsappLabels, WhatsappLabel } from "../components/ContactWhatsappLabels";
-import { ContactFunnelStage } from "../components/ContactFunnelStage";
+import { ContactDeal } from "../components/ContactDeal";
 import { useAuth } from "../context/AuthContext";
 import { SignatureSettings } from "../components/SignatureSettings";
 import { TranscriptionSettings } from "../components/TranscriptionSettings";
@@ -126,6 +127,8 @@ function MessageBubble({ message }: { message: Message }) {
 export function InboxPage() {
   const { organization } = useAuth();
   const canAccessKanban = organization?.allowedModules.includes("kanban") ?? false;
+  const location = useLocation();
+  const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -154,6 +157,18 @@ export function InboxPage() {
   useEffect(() => {
     refreshConversations();
   }, []);
+
+  // Arriving from the Kanban board's "Ir para Caixa de Entrada" button: open that contact's
+  // conversation as soon as the list has loaded, then clear the nav state so it doesn't
+  // re-trigger on a later re-render (e.g. after sending a message).
+  useEffect(() => {
+    const contactId = (location.state as { contactId?: string } | null)?.contactId;
+    if (!contactId || conversations.length === 0) return;
+    const match = conversations.find((c) => c.contact.id === contactId);
+    if (match) selectConversation(match.id);
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, location.state]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -452,7 +467,7 @@ export function InboxPage() {
                 {canAccessKanban && (
                   <>
                     <span className="h-4 w-px bg-gray-200" />
-                    <ContactFunnelStage key={selectedConversation.contact.id} contactId={selectedConversation.contact.id} />
+                    <ContactDeal key={selectedConversation.contact.id} contactId={selectedConversation.contact.id} />
                   </>
                 )}
               </div>
