@@ -89,6 +89,65 @@ export async function moveDeal(req: Request, res: Response) {
   res.json(updated);
 }
 
+// Lets the inbox show/change a contact's current funnel stage without leaving the
+// conversation. A contact's "current deal" is just their most recently created one — there's
+// only ever one pipeline per org today, so this never has to pick between several.
+export async function getContactDealStage(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.contactId, organizationId } });
+  if (!contact) throw new HttpError(404, "contact_not_found");
+
+  const deal = await prisma.deal.findFirst({
+    where: { contactId: contact.id, organizationId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, stageId: true },
+  });
+  res.json(deal);
+}
+
+const setContactDealStageSchema = z.object({ stageId: z.string() });
+
+export async function setContactDealStage(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const input = setContactDealStageSchema.parse(req.body);
+
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.contactId, organizationId } });
+  if (!contact) throw new HttpError(404, "contact_not_found");
+
+  const stage = await prisma.pipelineStage.findFirst({ where: { id: input.stageId, pipeline: { organizationId } } });
+  if (!stage) throw new HttpError(404, "stage_not_found");
+
+  const existingDeal = await prisma.deal.findFirst({
+    where: { contactId: contact.id, organizationId },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (existingDeal) {
+    if (existingDeal.stageId === stage.id) return res.json(existingDeal);
+    const lastInStage = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
+    const updated = await prisma.deal.update({
+      where: { id: existingDeal.id },
+      data: { pipelineId: stage.pipelineId, stageId: stage.id, order: (lastInStage?.order ?? -1) + 1 },
+    });
+    return res.json(updated);
+  }
+
+  // No deal yet for this contact — picking a stage from the conversation creates one, titled
+  // with the contact's own name so it shows up sensibly on the Kanban board right away.
+  const lastInStage = await prisma.deal.findFirst({ where: { stageId: stage.id }, orderBy: { order: "desc" } });
+  const created = await prisma.deal.create({
+    data: {
+      organizationId,
+      pipelineId: stage.pipelineId,
+      stageId: stage.id,
+      contactId: contact.id,
+      title: contact.name?.trim() || `+${contact.phoneNumber}`,
+      order: (lastInStage?.order ?? -1) + 1,
+    },
+  });
+  res.status(201).json(created);
+}
+
 export async function deleteDeal(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId } });

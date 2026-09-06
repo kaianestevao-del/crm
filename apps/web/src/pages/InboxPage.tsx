@@ -6,6 +6,8 @@ import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
 import { ContactWhatsappLabels, WhatsappLabel } from "../components/ContactWhatsappLabels";
+import { ContactFunnelStage } from "../components/ContactFunnelStage";
+import { useAuth } from "../context/AuthContext";
 import { SignatureSettings } from "../components/SignatureSettings";
 import { TranscriptionSettings } from "../components/TranscriptionSettings";
 import { AudioRecorderBar } from "../components/AudioRecorderBar";
@@ -122,6 +124,8 @@ function MessageBubble({ message }: { message: Message }) {
 }
 
 export function InboxPage() {
+  const { organization } = useAuth();
+  const canAccessKanban = organization?.allowedModules.includes("kanban") ?? false;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -445,6 +449,12 @@ export function InboxPage() {
                     )
                   }
                 />
+                {canAccessKanban && (
+                  <>
+                    <span className="h-4 w-px bg-gray-200" />
+                    <ContactFunnelStage key={selectedConversation.contact.id} contactId={selectedConversation.contact.id} />
+                  </>
+                )}
               </div>
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-4">
