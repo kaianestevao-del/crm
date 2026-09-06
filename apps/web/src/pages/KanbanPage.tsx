@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
-import { PlanType } from "@crm/shared";
+import { PlanType, PLAN_TYPE_LABELS } from "@crm/shared";
 import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
 
@@ -174,6 +174,7 @@ export function KanbanPage() {
                   <div className="flex-1 space-y-2">
                     {stage.deals.map((deal, index) => {
                       const totalValue = deal.payments.reduce((sum, p) => sum + p.value, 0);
+                      const planTypes = Array.from(new Set(deal.payments.map((p) => p.planType).filter(Boolean))) as PlanType[];
                       return (
                       <Draggable draggableId={deal.id} index={index} key={deal.id}>
                         {(dragProvided) => (
@@ -191,6 +192,15 @@ export function KanbanPage() {
                                 <span className="text-gray-400"> · {deal.payments.length} lançamentos</span>
                               )}
                             </p>
+                            {planTypes.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {planTypes.map((type) => (
+                                  <span key={type} className="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand-dark">
+                                    {PLAN_TYPE_LABELS[type]}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             {deal.followUp && (
                               <p className="mt-0.5 text-xs text-gray-500">
                                 🔁 {deal.followUp.contacts.length} de {deal.followUp.target}
