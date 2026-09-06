@@ -168,45 +168,54 @@ export function ConnectWhatsappPage() {
     <div className="h-full overflow-y-auto p-6">
       <h1 className="mb-1 text-lg font-semibold">Conexão com o WhatsApp</h1>
       <p className="mb-6 text-sm text-gray-500">
-        Conecte um número de WhatsApp escaneando o QR Code, como no WhatsApp Web. Um único número pode ser usado por múltiplos atendentes.
+        Conecte um número de WhatsApp escaneando o QR Code, como no WhatsApp Web. Por padrão, cada organização tem
+        apenas uma conexão ativa por vez.
       </p>
 
-      <form onSubmit={handleCreate} className="mb-6 max-w-xl rounded-lg border border-gray-200 bg-white p-4">
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Nome do número (ex: Comercial, Suporte)"
-          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-        />
+      {sessions.length > 0 && (
+        <p className="mb-6 text-xs text-gray-400">
+          Já existe uma conexão ativa. Apague-a para poder conectar um número diferente.
+        </p>
+      )}
 
-        <div className="mb-3 flex gap-4 text-sm">
-          <label className="flex items-center gap-1.5">
-            <input type="radio" checked={connectMethod === "qr"} onChange={() => setConnectMethod("qr")} />
-            QR Code
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="radio" checked={connectMethod === "code"} onChange={() => setConnectMethod("code")} />
-            Código de pareamento (para conectar por número, à distância)
-          </label>
-        </div>
-
-        {connectMethod === "code" && (
+      {sessions.length === 0 && (
+        <form onSubmit={handleCreate} className="mb-6 max-w-xl rounded-lg border border-gray-200 bg-white p-4">
           <input
-            value={pairingPhoneNumber}
-            onChange={(e) => setPairingPhoneNumber(e.target.value)}
-            placeholder="Número do funcionário com DDI e DDD (ex: 5511999998888)"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Nome do número (ex: Comercial, Suporte)"
             className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
-        )}
 
-        <button
-          type="submit"
-          disabled={creating || !newName.trim() || (connectMethod === "code" && !pairingPhoneNumber.trim())}
-          className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          Conectar novo número
-        </button>
-      </form>
+          <div className="mb-3 flex gap-4 text-sm">
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={connectMethod === "qr"} onChange={() => setConnectMethod("qr")} />
+              QR Code
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={connectMethod === "code"} onChange={() => setConnectMethod("code")} />
+              Código de pareamento (para conectar por número, à distância)
+            </label>
+          </div>
+
+          {connectMethod === "code" && (
+            <input
+              value={pairingPhoneNumber}
+              onChange={(e) => setPairingPhoneNumber(e.target.value)}
+              placeholder="Número do funcionário com DDI e DDD (ex: 5511999998888)"
+              className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            />
+          )}
+
+          <button
+            type="submit"
+            disabled={creating || !newName.trim() || (connectMethod === "code" && !pairingPhoneNumber.trim())}
+            className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Conectar novo número
+          </button>
+        </form>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {sessions.map((session) => (
@@ -271,7 +280,9 @@ export function ConnectWhatsappPage() {
             {session.phoneNumber && linkGeneratorFor === session.id && <WaLinkGenerator phoneNumber={session.phoneNumber} />}
           </div>
         ))}
-        {sessions.length === 0 && <p className="text-sm text-gray-500">Nenhum número conectado ainda.</p>}
+        {sessions.length === 0 && (
+          <p className="text-sm text-gray-500">Nenhum número conectado ainda. Use o formulário acima para conectar o primeiro.</p>
+        )}
       </div>
     </div>
   );

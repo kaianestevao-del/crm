@@ -20,10 +20,17 @@ export async function listSessions(req: Request, res: Response) {
 }
 
 export async function createSession(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
   const input = createSchema.parse(req.body);
+
+  // Default product rule: one active WhatsApp connection per organization. An org that
+  // genuinely needs more can still be special-cased later, but nothing today asks for it.
+  const existing = await prisma.whatsappSession.findFirst({ where: { organizationId, archivedAt: null } });
+  if (existing) throw new HttpError(409, "organization_already_has_a_connection");
+
   const pairingPhoneNumber = input.pairingPhoneNumber?.replace(/\D/g, "");
   const session = await prisma.whatsappSession.create({
-    data: { organizationId: req.auth!.organizationId, name: input.name },
+    data: { organizationId, name: input.name },
   });
   await sessionCommandsQueue.add("start", { sessionId: session.id, command: "START", pairingPhoneNumber });
   res.status(201).json(session);
