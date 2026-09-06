@@ -39,6 +39,7 @@ export const PLAN_TYPES = [
   "DESAFIO_14",
   "DESAFIO_21",
   "DESAFIO_30",
+  "AVULSO",
 ] as const;
 export type PlanType = (typeof PLAN_TYPES)[number];
 
@@ -51,6 +52,7 @@ export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   DESAFIO_14: "Desafio de 14 dias",
   DESAFIO_21: "Desafio de 21 dias",
   DESAFIO_30: "Desafio de 30 dias",
+  AVULSO: "Comprou avulso",
 };
 
 export const PAYMENT_METHODS = ["CREDIT_CARD", "PIX"] as const;
