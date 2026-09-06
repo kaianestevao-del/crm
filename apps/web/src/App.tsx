@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { InboxPage } from "./pages/InboxPage";
+import { ContactsPage } from "./pages/ContactsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { KanbanPage } from "./pages/KanbanPage";
 import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
@@ -23,6 +24,9 @@ export function App() {
           <Route element={<Layout />}>
             <Route element={<RequireModule module="inbox" />}>
               <Route path="/inbox" element={<InboxPage />} />
+            </Route>
+            <Route element={<RequireModule module="contacts" />}>
+              <Route path="/contatos" element={<ContactsPage />} />
             </Route>
             <Route element={<RequireModule module="dashboard" />}>
               <Route path="/dashboard" element={<DashboardPage />} />

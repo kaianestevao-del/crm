@@ -11,14 +11,16 @@ export async function listContacts(req: Request, res: Response) {
     include: {
       tags: { include: { tag: true } },
       whatsappLabels: { include: { label: true } },
+      _count: { select: { conversations: true } },
     },
     orderBy: { createdAt: "desc" },
   });
   res.json(
-    contacts.map(({ tags, whatsappLabels, ...contact }) => ({
+    contacts.map(({ tags, whatsappLabels, _count, ...contact }) => ({
       ...contact,
       tags: tags.map((t) => t.tag),
       whatsappLabels: whatsappLabels.map((l) => l.label),
+      hasConversation: _count.conversations > 0,
     })),
   );
 }

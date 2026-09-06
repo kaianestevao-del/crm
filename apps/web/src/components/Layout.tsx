@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 
 const navItems: { to: string; label: string; module?: ModuleKey; ownerOrAdminOnly?: boolean }[] = [
   { to: "/inbox", label: "Caixa de Entrada", module: "inbox" },
+  { to: "/contatos", label: "Contatos", module: "contacts" },
   { to: "/dashboard", label: "Dashboard", module: "dashboard" },
   { to: "/kanban", label: "Funil", module: "kanban" },
   { to: "/autoatendimento", label: "Autoatendimento", module: "autoatendimento" },

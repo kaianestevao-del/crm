@@ -360,11 +360,25 @@ async function recordMessage(
   const pushName = msg.pushName ?? undefined;
   const messageDate = msg.messageTimestamp ? new Date(Number(msg.messageTimestamp) * 1000) : new Date();
 
+  const existingContact = await prisma.contact.findUnique({
+    where: { organizationId_waJid: { organizationId, waJid: jid } },
+    select: { id: true },
+  });
+
   const contact = await prisma.contact.upsert({
     where: { organizationId_waJid: { organizationId, waJid: jid } },
     update: pushName && !fromMe ? { name: pushName } : {},
     create: { organizationId, waJid: jid, phoneNumber, name: fromMe ? undefined : pushName },
   });
+
+  // First time we ever see this contact — tag with the month/year they arrived, independent
+  // of autoatendimento (which only tags by keyword match). Lets the Dashboard/Contatos view
+  // group leads by when they first showed up without relying on manual tagging.
+  if (!existingContact) {
+    await tagContactWithArrivalMonth(organizationId, contact.id, messageDate).catch((err) =>
+      console.error("arrival_month_tag_error", err),
+    );
+  }
 
   // Fetch the WhatsApp profile photo once, the first time we see this contact — cheap enough
   // to do inline here since we already have a live socket, and avoids hammering WhatsApp on
@@ -476,6 +490,29 @@ async function maybeAutoTag(organizationId: string, contactId: string, text: str
     skipDuplicates: true,
   });
 
+  publishRealtimeEvent({ type: "contact.updated", organizationId, contactId });
+}
+
+const MONTH_NAMES_PT = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+// Tags a brand-new contact with the month/year they first showed up (e.g. "Setembro/2026"),
+// so leads can be grouped by arrival cohort without relying on autoatendimento (keyword-only,
+// and off by default). Same tag-name convention as the WaSpeed export this org migrated from.
+async function tagContactWithArrivalMonth(organizationId: string, contactId: string, date: Date) {
+  const tagName = `${MONTH_NAMES_PT[date.getMonth()]}/${date.getFullYear()}`;
+  const tag = await prisma.tag.upsert({
+    where: { organizationId_name: { organizationId, name: tagName } },
+    update: {},
+    create: { organizationId, name: tagName },
+  });
+  await prisma.contactTag.upsert({
+    where: { contactId_tagId: { contactId, tagId: tag.id } },
+    update: {},
+    create: { contactId, tagId: tag.id },
+  });
   publishRealtimeEvent({ type: "contact.updated", organizationId, contactId });
 }
 

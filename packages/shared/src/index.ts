@@ -7,11 +7,12 @@ export enum Role {
 // Per-Agent module access. OWNER/ADMIN always see every module regardless of this list — it
 // only ever restricts AGENT accounts, one on/off switch per module (no separate view/edit
 // distinction, by request).
-export const MODULE_KEYS = ["inbox", "dashboard", "kanban", "autoatendimento"] as const;
+export const MODULE_KEYS = ["inbox", "contacts", "dashboard", "kanban", "autoatendimento"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export const MODULE_LABELS: Record<ModuleKey, string> = {
   inbox: "Caixa de Entrada",
+  contacts: "Contatos",
   dashboard: "Dashboard",
   kanban: "Funil",
   autoatendimento: "Autoatendimento",

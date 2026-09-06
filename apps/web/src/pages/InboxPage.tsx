@@ -8,6 +8,7 @@ import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
 import { ContactWhatsappLabels, WhatsappLabel } from "../components/ContactWhatsappLabels";
 import { ContactDeal } from "../components/ContactDeal";
+import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
 import { useAuth } from "../context/AuthContext";
 import { SignatureSettings } from "../components/SignatureSettings";
 import { TranscriptionSettings } from "../components/TranscriptionSettings";
@@ -45,25 +46,6 @@ interface Message {
   transcript: string | null;
   revokedAt: string | null;
   createdAt: string;
-}
-
-function contactLabel(contact: Contact) {
-  return contact.name?.trim() || `+${contact.phoneNumber}`;
-}
-
-function ContactAvatar({ contact, size = 36 }: { contact: Contact; size?: number }) {
-  const style = { width: size, height: size };
-  if (contact.avatarUrl) {
-    return <img src={contact.avatarUrl} alt="" style={style} className="flex-shrink-0 rounded-full object-cover" />;
-  }
-  return (
-    <div
-      style={style}
-      className="flex flex-shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand-dark"
-    >
-      {contactLabel(contact).slice(0, 1).toUpperCase()}
-    </div>
-  );
 }
 
 const MEDIA_PREVIEW_LABEL: Partial<Record<MessageType, string>> = {

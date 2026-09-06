@@ -30,7 +30,10 @@ interface DashboardSummary {
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
-const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" });
+// timeZone: "UTC" is deliberate — the API's DATE_TRUNC('month', ...) always returns UTC
+// midnight on the 1st, and formatting that in a negative-offset zone (e.g. Brazil) would
+// roll it back to the last day of the previous month.
+const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
 
 function formatSeconds(seconds: number | null): string {
   if (seconds == null) return "Sem dados";
