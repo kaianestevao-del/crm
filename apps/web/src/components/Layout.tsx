@@ -6,6 +6,7 @@ const navItems = [
   { to: "/kanban", label: "Funil" },
   { to: "/autoatendimento", label: "Autoatendimento" },
   { to: "/whatsapp", label: "Conexão WhatsApp" },
+  { to: "/equipe", label: "Equipe" },
 ];
 
 export function Layout() {
