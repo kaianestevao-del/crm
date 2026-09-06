@@ -185,8 +185,15 @@ importers:
       prisma:
         specifier: ^5.20.0
         version: 5.22.0
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
 
-  packages/shared: {}
+  packages/shared:
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
 
 packages:
 

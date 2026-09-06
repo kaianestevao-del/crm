@@ -2,8 +2,9 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
+import { env } from "./env";
 
-const uploadsRoot = path.join(__dirname, "..", "uploads");
+const uploadsRoot = path.resolve(env.UPLOADS_DIR);
 
 function diskStorage(subdir: string) {
   const dir = path.join(uploadsRoot, subdir);

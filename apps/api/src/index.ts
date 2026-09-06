@@ -20,13 +20,25 @@ import { scheduledMessagesRouter } from "./modules/scheduled-messages/scheduled-
 import { autoTagRulesRouter } from "./modules/auto-tag-rules/auto-tag-rules.routes";
 import { teamRouter } from "./modules/team/team.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
+import { webhooksRouter } from "./modules/webhooks/webhooks.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
-app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+app.use(
+  express.json({
+    // Meta signs the exact bytes it sent (X-Hub-Signature-256) — keep the raw buffer around so
+    // the webhook route can verify against it instead of a re-serialized (and possibly
+    // byte-different) copy of the parsed body.
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
+app.use("/uploads", express.static(path.resolve(env.UPLOADS_DIR)));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+app.use("/webhooks", webhooksRouter);
 
 app.use("/auth", authRouter);
 app.use("/whatsapp-sessions", whatsappSessionsRouter);
