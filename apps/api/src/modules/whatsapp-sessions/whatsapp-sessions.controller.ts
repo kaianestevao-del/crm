@@ -106,6 +106,35 @@ export async function getSession(req: Request, res: Response) {
   res.json(toSessionResponse(session));
 }
 
+const updateCloudApiCredentialsSchema = z.object({
+  cloudApiAccessToken: z.string().min(1).optional(),
+  cloudApiAppSecret: z.string().min(1).optional(),
+  cloudApiPhoneNumberId: z.string().min(1).optional(),
+});
+
+// Lets an org fix a broken Cloud API credential (expired/permission-less token being the
+// common case) without deleting and recreating the whole connection — a fresh session would
+// get a new id, splitting every existing Conversation away from its history.
+export async function updateCloudApiCredentials(req: Request, res: Response) {
+  const session = await getOwnedSession(req.auth!.organizationId, req.params.id);
+  if (session.provider !== "CLOUD_API") throw new HttpError(400, "not_supported_for_baileys");
+
+  const input = updateCloudApiCredentialsSchema.parse(req.body);
+  if (!input.cloudApiAccessToken && !input.cloudApiAppSecret && !input.cloudApiPhoneNumberId) {
+    throw new HttpError(400, "nothing_to_update");
+  }
+
+  const updated = await prisma.whatsappSession.update({
+    where: { id: session.id },
+    data: {
+      cloudApiAccessToken: input.cloudApiAccessToken,
+      cloudApiAppSecret: input.cloudApiAppSecret,
+      cloudApiPhoneNumberId: input.cloudApiPhoneNumberId,
+    },
+  });
+  res.json(toSessionResponse(updated));
+}
+
 // Cloud API sessions have no live socket to restart/log out — there's nothing running in the
 // worker for them to act on, so these become direct status updates instead of queue commands.
 export async function restartSession(req: Request, res: Response) {

@@ -162,6 +162,76 @@ function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneN
   );
 }
 
+function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+  const [accessToken, setAccessToken] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    if (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim()) return;
+    setSaving(true);
+    try {
+      await api.patch(`/whatsapp-sessions/${sessionId}/cloud-api-credentials`, {
+        cloudApiAccessToken: accessToken.trim() || undefined,
+        cloudApiAppSecret: appSecret.trim() || undefined,
+        cloudApiPhoneNumberId: phoneNumberId.trim() || undefined,
+      });
+      setAccessToken("");
+      setAppSecret("");
+      setPhoneNumberId("");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="mt-3 space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <p className="text-xs font-medium text-gray-600">Atualizar credenciais da API Oficial</p>
+      <p className="text-[10px] text-gray-400">
+        Preencha só o que precisa trocar — o que ficar em branco continua com o valor salvo antes.
+      </p>
+      <input
+        value={accessToken}
+        onChange={(e) => setAccessToken(e.target.value)}
+        placeholder="Novo Access Token"
+        type="password"
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+      />
+      <input
+        value={appSecret}
+        onChange={(e) => setAppSecret(e.target.value)}
+        placeholder="Novo App Secret (opcional)"
+        type="password"
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+      />
+      <input
+        value={phoneNumberId}
+        onChange={(e) => setPhoneNumberId(e.target.value)}
+        placeholder="Novo Phone Number ID (opcional)"
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+      />
+      <div className="flex items-center justify-end gap-2">
+        {saved && <span className="text-xs text-green-600">Salvo!</span>}
+        <button type="button" onClick={onClose} className="px-2 py-1 text-xs text-gray-500 hover:underline">
+          Fechar
+        </button>
+        <button
+          type="submit"
+          disabled={saving || (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim())}
+          className="rounded-md bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          Salvar
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function ConnectWhatsappPage() {
   const [sessions, setSessions] = useState<WhatsappSession[]>([]);
   const [newName, setNewName] = useState("");
@@ -172,6 +242,7 @@ export function ConnectWhatsappPage() {
   const [cloudAppSecret, setCloudAppSecret] = useState("");
   const [creating, setCreating] = useState(false);
   const [linkGeneratorFor, setLinkGeneratorFor] = useState<string | null>(null);
+  const [credentialsFormFor, setCredentialsFormFor] = useState<string | null>(null);
   const [confirmDeleteFor, setConfirmDeleteFor] = useState<string | null>(null);
   const [cloudWebhookInfo, setCloudWebhookInfo] = useState<{ url: string; verifyToken: string } | null>(null);
 
@@ -448,6 +519,14 @@ export function ConnectWhatsappPage() {
                   🔄 Ressincronizar etiquetas
                 </button>
               )}
+              {session.provider === "CLOUD_API" && (
+                <button
+                  onClick={() => setCredentialsFormFor((v) => (v === session.id ? null : session.id))}
+                  className="text-xs font-medium text-brand-dark hover:underline"
+                >
+                  🔑 Atualizar token
+                </button>
+              )}
               {confirmDeleteFor === session.id ? (
                 <span className="flex w-full flex-wrap items-center gap-2 text-xs">
                   <span className="text-gray-500">Apagar esta conexão? As conversas já registradas continuam salvas.</span>
@@ -466,6 +545,9 @@ export function ConnectWhatsappPage() {
             </div>
             {session.phoneNumber && linkGeneratorFor === session.id && (
               <WaLinkGenerator sessionId={session.id} phoneNumber={session.phoneNumber} />
+            )}
+            {credentialsFormFor === session.id && (
+              <CloudApiCredentialsForm sessionId={session.id} onClose={() => setCredentialsFormFor(null)} />
             )}
           </div>
         ))}
