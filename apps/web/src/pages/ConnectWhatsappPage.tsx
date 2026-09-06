@@ -144,7 +144,7 @@ export function ConnectWhatsappPage() {
         />
         <button
           type="submit"
-          disabled={creating}
+          disabled={creating || !newName.trim()}
           className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           Conectar novo número
