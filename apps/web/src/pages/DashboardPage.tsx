@@ -12,10 +12,9 @@ interface RecentPayment {
 }
 
 interface Cohort {
-  month: string;
+  label: string;
   totalLeads: number;
   convertedCount: number;
-  avgDaysToConvert: number | null;
 }
 
 interface DashboardSummary {
@@ -30,10 +29,6 @@ interface DashboardSummary {
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
-// timeZone: "UTC" is deliberate — the API's DATE_TRUNC('month', ...) always returns UTC
-// midnight on the 1st, and formatting that in a negative-offset zone (e.g. Brazil) would
-// roll it back to the last day of the previous month.
-const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
 
 function formatSeconds(seconds: number | null): string {
   if (seconds == null) return "Sem dados";
@@ -52,11 +47,6 @@ function formatDays(days: number | null): string {
 function formatContacts(count: number | null): string {
   if (count == null) return "—";
   return `${Math.round(count)} contatos`;
-}
-
-function formatMonth(iso: string): string {
-  const label = monthFormatter.format(new Date(iso));
-  return label.charAt(0).toUpperCase() + label.slice(1).replace(".", "");
 }
 
 export function DashboardPage() {
@@ -167,7 +157,7 @@ export function DashboardPage() {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white">
-          <p className="border-b border-gray-100 p-4 text-sm font-semibold text-gray-700">Cohort mensal (entrada do lead)</p>
+          <p className="border-b border-gray-100 p-4 text-sm font-semibold text-gray-700">Cohort por mês de chegada (abas)</p>
           {data.cohorts.length === 0 ? (
             <p className="p-4 text-sm text-gray-400">Sem contatos registrados ainda.</p>
           ) : (
@@ -175,9 +165,9 @@ export function DashboardPage() {
               {data.cohorts.map((c) => {
                 const pct = c.totalLeads > 0 ? Math.round((c.convertedCount / c.totalLeads) * 100) : 0;
                 return (
-                  <div key={c.month}>
+                  <div key={c.label}>
                     <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                      <span className="font-medium text-gray-700">{formatMonth(c.month)}</span>
+                      <span className="font-medium text-gray-700">{c.label}</span>
                       <span>
                         {c.convertedCount} de {c.totalLeads} leads · {pct}%
                       </span>

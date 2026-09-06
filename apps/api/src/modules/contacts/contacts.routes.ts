@@ -4,6 +4,7 @@ import { requireAuth } from "../../middleware/auth";
 import {
   listContacts,
   createContact,
+  updateContactName,
   listContactNotes,
   createContactNote,
   addContactTag,
@@ -19,6 +20,7 @@ contactsRouter.use(requireAuth);
 contactsRouter.get("/", asyncHandler(listContacts));
 contactsRouter.get("/export", asyncHandler(exportContacts));
 contactsRouter.post("/", asyncHandler(createContact));
+contactsRouter.patch("/:id", asyncHandler(updateContactName));
 contactsRouter.get("/:id/notes", asyncHandler(listContactNotes));
 contactsRouter.post("/:id/notes", asyncHandler(createContactNote));
 contactsRouter.post("/:id/tags", asyncHandler(addContactTag));

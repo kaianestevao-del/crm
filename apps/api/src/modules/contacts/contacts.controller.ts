@@ -48,6 +48,18 @@ export async function createContact(req: Request, res: Response) {
   res.status(201).json(contact);
 }
 
+const updateNameSchema = z.object({ name: z.string().min(1) });
+
+export async function updateContactName(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const input = updateNameSchema.parse(req.body);
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId } });
+  if (!contact) throw new HttpError(404, "contact_not_found");
+
+  const updated = await prisma.contact.update({ where: { id: contact.id }, data: { name: input.name.trim() } });
+  res.json(updated);
+}
+
 export async function listContactNotes(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const contact = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId } });

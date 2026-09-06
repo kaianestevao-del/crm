@@ -24,6 +24,9 @@ export function ContactsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -48,6 +51,24 @@ export function ContactsPage() {
       return contactLabel(c).toLowerCase().includes(query) || c.phoneNumber.includes(query);
     });
   }, [contacts, search, tagFilter]);
+
+  function startEditing(contact: Contact) {
+    setEditingId(contact.id);
+    setEditingName(contact.name ?? "");
+  }
+
+  async function saveName(contactId: string) {
+    const name = editingName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const res = await api.patch(`/contacts/${contactId}`, { name });
+      setContacts((prev) => prev.map((c) => (c.id === contactId ? { ...c, name: res.data.name } : c)));
+      setEditingId(null);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) return <div className="p-6 text-sm text-gray-500">Carregando contatos...</div>;
 
@@ -93,7 +114,41 @@ export function ContactsPage() {
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
                     <ContactAvatar contact={contact} size={28} />
-                    <span className="font-medium">{contactLabel(contact)}</span>
+                    {editingId === contact.id ? (
+                      <>
+                        <input
+                          autoFocus
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveName(contact.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                        />
+                        <button
+                          onClick={() => saveName(contact.id)}
+                          disabled={saving || !editingName.trim()}
+                          className="text-xs font-medium text-brand-dark hover:underline disabled:opacity-50"
+                        >
+                          Salvar
+                        </button>
+                        <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:underline">
+                          Cancelar
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium">{contactLabel(contact)}</span>
+                        <button
+                          onClick={() => startEditing(contact)}
+                          title="Editar nome"
+                          className="text-gray-300 hover:text-brand-dark"
+                        >
+                          ✏️
+                        </button>
+                      </>
+                    )}
                   </div>
                 </td>
                 <td className="px-4 py-2 text-gray-600">+{contact.phoneNumber}</td>

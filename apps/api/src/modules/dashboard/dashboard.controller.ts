@@ -164,32 +164,54 @@ async function getFollowUpOutcomes(organizationId: string) {
   };
 }
 
+const MONTH_NAMES_PT = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+const OLDER_BUCKET_LABEL = "2025 ou antes";
+
+// Groups contacts by their "Mês/Ano" tag (e.g. "Setembro/2026") — set automatically on first
+// contact (see the worker's tagContactWithArrivalMonth) or by the historical WaSpeed import —
+// rather than Contact.createdAt, which only reflects when the *row* was inserted (wrong for
+// anything bulk-imported). Any contact with none of these tags is assumed to predate the
+// month-tagging system entirely, i.e. arrived in "2025 ou antes".
 async function getMonthlyCohorts(organizationId: string) {
-  const rows = await prisma.$queryRaw<
-    { cohortMonth: Date; totalLeads: bigint; convertedCount: bigint; avgDaysToConvert: number | null }[]
-  >`
-    WITH first_payment AS (
-      SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
-      FROM "DealPayment" dp
-      JOIN "Deal" d ON d.id = dp."dealId"
-      WHERE d."organizationId" = ${organizationId}
-      GROUP BY d."contactId"
+  const monthNamesPattern = MONTH_NAMES_PT.join("|");
+  const rows = await prisma.$queryRawUnsafe<{ label: string; totalLeads: bigint; convertedCount: bigint }[]>(
+    `
+    WITH month_tags AS (
+      SELECT id, name FROM "Tag"
+      WHERE "organizationId" = $1 AND name ~ '^(${monthNamesPattern})/\\d{4}$'
+    ),
+    contact_month AS (
+      SELECT DISTINCT ON (ct."contactId") ct."contactId", mt.name AS tag_name
+      FROM "ContactTag" ct JOIN month_tags mt ON mt.id = ct."tagId"
+    ),
+    converted AS (
+      SELECT DISTINCT d."contactId" FROM "Deal" d JOIN "DealPayment" dp ON dp."dealId" = d.id WHERE d."organizationId" = $1
     )
     SELECT
-      DATE_TRUNC('month', c."createdAt") AS "cohortMonth",
+      COALESCE(cm.tag_name, '${OLDER_BUCKET_LABEL}') AS label,
       COUNT(*) AS "totalLeads",
-      COUNT(fp."contactId") AS "convertedCount",
-      AVG(EXTRACT(EPOCH FROM (fp.first_paid_at - c."createdAt")) / 86400.0) FILTER (WHERE fp."contactId" IS NOT NULL) AS "avgDaysToConvert"
+      COUNT(cv."contactId") AS "convertedCount"
     FROM "Contact" c
-    LEFT JOIN first_payment fp ON fp."contactId" = c.id
-    WHERE c."organizationId" = ${organizationId}
-    GROUP BY 1
-    ORDER BY 1
-  `;
-  return rows.map((r) => ({
-    month: r.cohortMonth,
-    totalLeads: Number(r.totalLeads),
-    convertedCount: Number(r.convertedCount),
-    avgDaysToConvert: r.avgDaysToConvert == null ? null : Number(r.avgDaysToConvert),
-  }));
+    LEFT JOIN contact_month cm ON cm."contactId" = c.id
+    LEFT JOIN converted cv ON cv."contactId" = c.id
+    WHERE c."organizationId" = $1
+    GROUP BY label
+    `,
+    organizationId,
+  );
+
+  const sorted = rows
+    .map((r) => ({ label: r.label, totalLeads: Number(r.totalLeads), convertedCount: Number(r.convertedCount) }))
+    .sort((a, b) => {
+      if (a.label === OLDER_BUCKET_LABEL) return -1;
+      if (b.label === OLDER_BUCKET_LABEL) return 1;
+      const [aMonth, aYear] = a.label.split("/");
+      const [bMonth, bYear] = b.label.split("/");
+      if (aYear !== bYear) return Number(aYear) - Number(bYear);
+      return MONTH_NAMES_PT.indexOf(aMonth) - MONTH_NAMES_PT.indexOf(bMonth);
+    });
+  return sorted;
 }
