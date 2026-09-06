@@ -54,6 +54,11 @@ export function KanbanPage() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [contactId, setContactId] = useState("");
+  const [showStageForm, setShowStageForm] = useState(false);
+  const [newStageName, setNewStageName] = useState("");
+  const [savingStage, setSavingStage] = useState(false);
+  const [stageError, setStageError] = useState<string | null>(null);
+  const [confirmDeleteStageId, setConfirmDeleteStageId] = useState<string | null>(null);
 
   async function refresh() {
     const [pipelinesRes, contactsRes] = await Promise.all([api.get("/pipelines"), api.get("/contacts")]);
@@ -108,6 +113,35 @@ export function KanbanPage() {
     });
   }
 
+  async function handleCreateStage(e: FormEvent) {
+    e.preventDefault();
+    if (!pipeline || !newStageName.trim()) return;
+    setSavingStage(true);
+    try {
+      await api.post(`/pipelines/${pipeline.id}/stages`, { name: newStageName.trim() });
+      setNewStageName("");
+      setShowStageForm(false);
+      await refresh();
+    } finally {
+      setSavingStage(false);
+    }
+  }
+
+  async function handleDeleteStage(stageId: string) {
+    setStageError(null);
+    setConfirmDeleteStageId(null);
+    try {
+      await api.delete(`/pipelines/stages/${stageId}`);
+      await refresh();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error === "stage_has_deals"
+          ? "Mova ou apague os negócios desta etapa antes de removê-la."
+          : "Não foi possível apagar esta etapa.";
+      setStageError(message);
+    }
+  }
+
   if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando funil...</div>;
 
   return (
@@ -122,6 +156,12 @@ export function KanbanPage() {
             ⬇️ Exportar negócios
           </button>
           <button
+            onClick={() => setShowStageForm((v) => !v)}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            + Nova etapa
+          </button>
+          <button
             onClick={() => setShowForm((v) => !v)}
             className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
@@ -129,6 +169,34 @@ export function KanbanPage() {
           </button>
         </div>
       </div>
+
+      {showStageForm && (
+        <form onSubmit={handleCreateStage} className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-white p-3">
+          <input
+            autoFocus
+            value={newStageName}
+            onChange={(e) => setNewStageName(e.target.value)}
+            placeholder="Nome da nova etapa"
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={savingStage || !newStageName.trim()}
+            className="rounded-md bg-brand-dark px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Adicionar
+          </button>
+        </form>
+      )}
+
+      {stageError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {stageError}
+          <button onClick={() => setStageError(null)} className="text-red-400 hover:underline">
+            ✕
+          </button>
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={handleCreateDeal} className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-white p-3">
@@ -168,9 +236,29 @@ export function KanbanPage() {
                   {...provided.droppableProps}
                   className="flex w-72 flex-shrink-0 flex-col rounded-lg bg-gray-100 p-3"
                 >
-                  <p className="mb-3 text-sm font-semibold text-gray-700">
-                    {stage.name} <span className="text-gray-400">({stage.deals.length})</span>
-                  </p>
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-gray-700">
+                      {stage.name} <span className="text-gray-400">({stage.deals.length})</span>
+                    </p>
+                    {confirmDeleteStageId === stage.id ? (
+                      <span className="flex items-center gap-1 text-xs">
+                        <button onClick={() => handleDeleteStage(stage.id)} className="font-medium text-red-600 hover:underline">
+                          Confirmar
+                        </button>
+                        <button onClick={() => setConfirmDeleteStageId(null)} className="text-gray-400 hover:underline">
+                          Cancelar
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteStageId(stage.id)}
+                        title="Remover etapa"
+                        className="rounded px-1 text-gray-400 hover:bg-gray-200 hover:text-red-600"
+                      >
+                        −
+                      </button>
+                    )}
+                  </div>
                   <div className="flex-1 space-y-2">
                     {stage.deals.map((deal, index) => {
                       const totalValue = deal.payments.reduce((sum, p) => sum + p.value, 0);

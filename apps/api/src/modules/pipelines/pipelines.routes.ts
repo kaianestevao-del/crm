@@ -12,6 +12,8 @@ import {
   setContactDealStage,
   addDealPayment,
   deleteDealPayment,
+  createPipelineStage,
+  deletePipelineStage,
   updatePipelineStageRole,
   markFollowUpContact,
   unmarkFollowUpContact,
@@ -30,6 +32,8 @@ pipelinesRouter.get("/contacts/:contactId/deal", asyncHandler(getContactDeal));
 pipelinesRouter.put("/contacts/:contactId/deal-stage", asyncHandler(setContactDealStage));
 pipelinesRouter.post("/contacts/:contactId/deal-payments", asyncHandler(addDealPayment));
 pipelinesRouter.delete("/deals/payments/:paymentId", asyncHandler(deleteDealPayment));
+pipelinesRouter.post("/:pipelineId/stages", asyncHandler(createPipelineStage));
+pipelinesRouter.delete("/stages/:id", asyncHandler(deletePipelineStage));
 pipelinesRouter.patch("/stages/:id", asyncHandler(updatePipelineStageRole));
 pipelinesRouter.put("/stage-history/:stageHistoryId/follow-up-contacts/:index", asyncHandler(markFollowUpContact));
 pipelinesRouter.delete("/stage-history/:stageHistoryId/follow-up-contacts/:index", asyncHandler(unmarkFollowUpContact));

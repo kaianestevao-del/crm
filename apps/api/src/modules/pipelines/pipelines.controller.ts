@@ -273,6 +273,47 @@ export async function setContactDealStage(req: Request, res: Response) {
   res.status(201).json(created);
 }
 
+const createStageSchema = z.object({ name: z.string().min(1) });
+
+export async function createPipelineStage(req: Request, res: Response) {
+  const auth = req.auth!;
+  if (auth.role !== Role.OWNER && auth.role !== Role.ADMIN) {
+    throw new HttpError(403, "only_owner_or_admin_can_change_this");
+  }
+  const input = createStageSchema.parse(req.body);
+
+  const pipeline = await prisma.pipeline.findFirst({ where: { id: req.params.pipelineId, organizationId: auth.organizationId } });
+  if (!pipeline) throw new HttpError(404, "pipeline_not_found");
+
+  const lastStage = await prisma.pipelineStage.findFirst({ where: { pipelineId: pipeline.id }, orderBy: { order: "desc" } });
+  const stage = await prisma.pipelineStage.create({
+    data: { pipelineId: pipeline.id, name: input.name.trim(), order: (lastStage?.order ?? -1) + 1 },
+  });
+  res.status(201).json(stage);
+}
+
+// Refuses when the stage still has deals — deleting it would cascade-delete those Deals
+// (and their DealPayment/DealStageHistory rows) per the schema's onDelete: Cascade, which
+// would silently wipe real revenue history. Move deals out first, then delete.
+export async function deletePipelineStage(req: Request, res: Response) {
+  const auth = req.auth!;
+  if (auth.role !== Role.OWNER && auth.role !== Role.ADMIN) {
+    throw new HttpError(403, "only_owner_or_admin_can_change_this");
+  }
+  const stage = await prisma.pipelineStage.findFirst({
+    where: { id: req.params.id, pipeline: { organizationId: auth.organizationId } },
+    include: { _count: { select: { deals: true } } },
+  });
+  if (!stage) throw new HttpError(404, "stage_not_found");
+  if (stage._count.deals > 0) throw new HttpError(400, "stage_has_deals");
+
+  const stageCount = await prisma.pipelineStage.count({ where: { pipelineId: stage.pipelineId } });
+  if (stageCount <= 1) throw new HttpError(400, "pipeline_needs_at_least_one_stage");
+
+  await prisma.pipelineStage.delete({ where: { id: stage.id } });
+  res.json({ ok: true });
+}
+
 const updatePipelineStageRoleSchema = z.object({
   role: z.enum(PIPELINE_STAGE_ROLES).nullable(),
 });
