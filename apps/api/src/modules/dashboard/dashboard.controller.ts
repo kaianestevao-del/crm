@@ -11,6 +11,7 @@ export async function getDashboardSummary(req: Request, res: Response) {
     recentPayments,
     followUpOutcomes,
     cohorts,
+    revenue,
   ] = await Promise.all([
     getPatientCounts(organizationId),
     getAvgResponseSeconds(organizationId),
@@ -18,6 +19,7 @@ export async function getDashboardSummary(req: Request, res: Response) {
     getRecentPayments(organizationId),
     getFollowUpOutcomes(organizationId),
     getMonthlyCohorts(organizationId),
+    getRevenueStats(organizationId),
   ]);
 
   res.json({
@@ -28,7 +30,36 @@ export async function getDashboardSummary(req: Request, res: Response) {
     recentPayments,
     followUpOutcomes,
     cohorts,
+    revenue,
   });
+}
+
+async function getRevenueStats(organizationId: string) {
+  const rows = await prisma.$queryRaw<{ total: number | null; avg_ticket: number | null; avg_ltv: number | null }[]>`
+    WITH per_contact AS (
+      SELECT d."contactId", SUM(dp.value) AS contact_total
+      FROM "DealPayment" dp
+      JOIN "Deal" d ON d.id = dp."dealId"
+      WHERE d."organizationId" = ${organizationId}
+      GROUP BY d."contactId"
+    ),
+    all_payments AS (
+      SELECT dp.value
+      FROM "DealPayment" dp
+      JOIN "Deal" d ON d.id = dp."dealId"
+      WHERE d."organizationId" = ${organizationId}
+    )
+    SELECT
+      (SELECT SUM(value) FROM all_payments) AS total,
+      (SELECT AVG(value) FROM all_payments) AS avg_ticket,
+      (SELECT AVG(contact_total) FROM per_contact) AS avg_ltv
+  `;
+  const row = rows[0];
+  return {
+    total: row?.total == null ? 0 : Number(row.total),
+    avgTicket: row?.avg_ticket == null ? null : Number(row.avg_ticket),
+    avgLtv: row?.avg_ltv == null ? null : Number(row.avg_ltv),
+  };
 }
 
 async function getPatientCounts(organizationId: string) {
@@ -58,6 +89,11 @@ async function getAvgResponseSeconds(organizationId: string): Promise<number | n
 
 async function getFirstPaymentStats(organizationId: string) {
   const [daysRows, msgRows] = await Promise.all([
+    // fp.first_paid_at >= c."createdAt" excludes contacts bulk-imported with a historical
+    // payment attached — their Contact row was inserted today, so the naive diff would come
+    // out negative even though the payment is real; there's no reliable per-contact arrival
+    // date for those beyond the month-level tag, so they're left out of this average instead
+    // of skewing it.
     prisma.$queryRaw<{ avg_days: number | null }[]>`
       WITH first_payment AS (
         SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
@@ -69,7 +105,7 @@ async function getFirstPaymentStats(organizationId: string) {
       SELECT AVG(EXTRACT(EPOCH FROM (fp.first_paid_at - c."createdAt")) / 86400.0) AS avg_days
       FROM "Contact" c
       JOIN first_payment fp ON fp."contactId" = c.id
-      WHERE c."organizationId" = ${organizationId}
+      WHERE c."organizationId" = ${organizationId} AND fp.first_paid_at >= c."createdAt"
     `,
     prisma.$queryRaw<{ avg_inbound: number | null; avg_outbound: number | null }[]>`
       WITH first_payment AS (

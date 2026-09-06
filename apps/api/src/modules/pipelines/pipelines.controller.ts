@@ -2,7 +2,16 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import ExcelJS from "exceljs";
 import { Prisma } from "@crm/db";
-import { PLAN_TYPES, PLAN_TYPE_LABELS, PlanType, PIPELINE_STAGE_ROLES, Role } from "@crm/shared";
+import {
+  PLAN_TYPES,
+  PLAN_TYPE_LABELS,
+  PlanType,
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
+  PaymentMethod,
+  PIPELINE_STAGE_ROLES,
+  Role,
+} from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
@@ -174,7 +183,10 @@ export async function getContactDeal(req: Request, res: Response) {
       id: true,
       stageId: true,
       stage: { select: { role: true } },
-      payments: { orderBy: { paidAt: "asc" }, select: { id: true, value: true, planType: true, paidAt: true } },
+      payments: {
+        orderBy: { paidAt: "asc" },
+        select: { id: true, value: true, planType: true, paymentMethod: true, paidAt: true },
+      },
     },
   });
   if (!deal) return res.json(deal);
@@ -333,6 +345,7 @@ export async function unmarkFollowUpContact(req: Request, res: Response) {
 const addDealPaymentSchema = z.object({
   value: z.number().min(0),
   planType: z.enum(PLAN_TYPES).nullable().optional(),
+  paymentMethod: z.enum(PAYMENT_METHODS).nullable().optional(),
 });
 
 // A patient can pay more than once over time (renewals, top-ups), so each entry from the
@@ -347,7 +360,12 @@ export async function addDealPayment(req: Request, res: Response) {
 
   const deal = await findOrCreateCurrentDeal(organizationId, contact.id);
   await prisma.dealPayment.create({
-    data: { dealId: deal.id, value: input.value, planType: input.planType ?? null },
+    data: {
+      dealId: deal.id,
+      value: input.value,
+      planType: input.planType ?? null,
+      paymentMethod: input.paymentMethod ?? null,
+    },
   });
 
   const updated = await prisma.deal.findUniqueOrThrow({
@@ -355,7 +373,10 @@ export async function addDealPayment(req: Request, res: Response) {
     select: {
       id: true,
       stageId: true,
-      payments: { orderBy: { paidAt: "asc" }, select: { id: true, value: true, planType: true, paidAt: true } },
+      payments: {
+        orderBy: { paidAt: "asc" },
+        select: { id: true, value: true, planType: true, paymentMethod: true, paidAt: true },
+      },
     },
   });
   res.status(201).json(updated);
@@ -374,7 +395,10 @@ export async function deleteDealPayment(req: Request, res: Response) {
     select: {
       id: true,
       stageId: true,
-      payments: { orderBy: { paidAt: "asc" }, select: { id: true, value: true, planType: true, paidAt: true } },
+      payments: {
+        orderBy: { paidAt: "asc" },
+        select: { id: true, value: true, planType: true, paymentMethod: true, paidAt: true },
+      },
     },
   });
   res.json(updated);
@@ -412,6 +436,7 @@ export async function exportDeals(req: Request, res: Response) {
     { header: "Telefone", key: "phoneNumber", width: 18 },
     { header: "Valor total pago", key: "value", width: 16 },
     { header: "Lançamentos", key: "planType", width: 26 },
+    { header: "Formas de pagamento", key: "paymentMethod", width: 24 },
     { header: "Responsável", key: "assignedUser", width: 22 },
     { header: "Criado em", key: "createdAt", width: 20 },
   ];
@@ -423,6 +448,13 @@ export async function exportDeals(req: Request, res: Response) {
     const planTypes = deal.payments
       .map((p) => (p.planType ? PLAN_TYPE_LABELS[p.planType as PlanType] ?? p.planType : null))
       .filter((label): label is string => Boolean(label));
+    const paymentMethods = Array.from(
+      new Set(
+        deal.payments
+          .map((p) => (p.paymentMethod ? PAYMENT_METHOD_LABELS[p.paymentMethod as PaymentMethod] ?? p.paymentMethod : null))
+          .filter((label): label is string => Boolean(label)),
+      ),
+    );
     sheet.addRow({
       pipeline: deal.pipeline.name,
       stage: deal.stage.name,
@@ -431,6 +463,7 @@ export async function exportDeals(req: Request, res: Response) {
       phoneNumber: `+${deal.contact.phoneNumber}`,
       value: totalValue || "",
       planType: planTypes.join(", "),
+      paymentMethod: paymentMethods.join(", "),
       assignedUser: deal.assignedUser?.name ?? "",
       createdAt: deal.createdAt.toLocaleString("pt-BR"),
     });

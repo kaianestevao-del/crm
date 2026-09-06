@@ -25,6 +25,7 @@ interface DashboardSummary {
   recentPayments: RecentPayment[];
   followUpOutcomes: { avgConverted: number | null; avgLost: number | null };
   cohorts: Cohort[];
+  revenue: { total: number; avgTicket: number | null; avgLtv: number | null };
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -70,6 +71,20 @@ export function DashboardPage() {
     { label: "Tempo médio até 1º pagamento", value: formatDays(data.avgDaysToFirstPayment), tone: "text-brand-dark" },
   ];
 
+  const revenueKpis = [
+    { label: "Faturamento Total", value: currencyFormatter.format(data.revenue.total), tone: "text-brand-dark" },
+    {
+      label: "Ticket Médio",
+      value: data.revenue.avgTicket == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgTicket),
+      tone: "text-brand-dark",
+    },
+    {
+      label: "LTV Médio",
+      value: data.revenue.avgLtv == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgLtv),
+      tone: "text-brand-dark",
+    },
+  ];
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="mb-1 text-lg font-semibold">Dashboard</h1>
@@ -77,6 +92,15 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-4 gap-4">
         {kpis.map((kpi) => (
+          <div key={kpi.label} className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-medium text-gray-500">{kpi.label}</p>
+            <p className={`mt-1 text-2xl font-semibold ${kpi.tone}`}>{kpi.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-4">
+        {revenueKpis.map((kpi) => (
           <div key={kpi.label} className="rounded-lg border border-gray-200 bg-white p-4">
             <p className="text-xs font-medium text-gray-500">{kpi.label}</p>
             <p className={`mt-1 text-2xl font-semibold ${kpi.tone}`}>{kpi.value}</p>

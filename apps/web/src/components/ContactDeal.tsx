@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PLAN_TYPES, PLAN_TYPE_LABELS, PlanType } from "@crm/shared";
+import { PLAN_TYPES, PLAN_TYPE_LABELS, PlanType, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PaymentMethod } from "@crm/shared";
 import { api } from "../lib/api";
 
 interface Stage {
@@ -12,6 +12,7 @@ interface Payment {
   id: string;
   value: number;
   planType: PlanType | null;
+  paymentMethod: PaymentMethod | null;
   paidAt: string;
 }
 
@@ -43,6 +44,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   const [showPanel, setShowPanel] = useState(false);
   const [valueInput, setValueInput] = useState("");
   const [planTypeInput, setPlanTypeInput] = useState<PlanType | "">("");
+  const [paymentMethodInput, setPaymentMethodInput] = useState<PaymentMethod | "">("");
   const [saving, setSaving] = useState(false);
   const [showFollowUpPanel, setShowFollowUpPanel] = useState(false);
   const [togglingIndex, setTogglingIndex] = useState<number | null>(null);
@@ -78,6 +80,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   function openPanel() {
     setValueInput("");
     setPlanTypeInput("");
+    setPaymentMethodInput("");
     setShowPanel(true);
   }
 
@@ -89,10 +92,12 @@ export function ContactDeal({ contactId }: { contactId: string }) {
       await api.post(`/pipelines/contacts/${contactId}/deal-payments`, {
         value,
         planType: planTypeInput || null,
+        paymentMethod: paymentMethodInput || null,
       });
       await refresh();
       setValueInput("");
       setPlanTypeInput("");
+      setPaymentMethodInput("");
     } finally {
       setSaving(false);
     }
@@ -217,6 +222,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
                     <span>
                       {currencyFormatter.format(p.value)}
                       {p.planType && ` · ${PLAN_TYPE_LABELS[p.planType]}`}
+                      {p.paymentMethod && ` · ${PAYMENT_METHOD_LABELS[p.paymentMethod]}`}
                       <span className="text-gray-400"> · {dateFormatter.format(new Date(p.paidAt))}</span>
                     </span>
                     <button
@@ -251,6 +257,19 @@ export function ContactDeal({ contactId }: { contactId: string }) {
               {PLAN_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {PLAN_TYPE_LABELS[type]}
+                </option>
+              ))}
+            </select>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Forma de pagamento</label>
+            <select
+              value={paymentMethodInput}
+              onChange={(e) => setPaymentMethodInput(e.target.value as PaymentMethod | "")}
+              className="mb-3 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+            >
+              <option value="">Selecione...</option>
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {PAYMENT_METHOD_LABELS[method]}
                 </option>
               ))}
             </select>

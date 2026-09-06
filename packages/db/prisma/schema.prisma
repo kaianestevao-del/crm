@@ -454,14 +454,20 @@ model Deal {
   @@index([stageId])
 }
 
+enum PaymentMethod {
+  CREDIT_CARD
+  PIX
+}
+
 // One row per value the patient has paid — a deal can have several over time
 // (e.g. renews monthly), so the Kanban card and conversation show the running
 // total plus each individual entry rather than a single overwritable value.
 model DealPayment {
-  id       String   @id @default(cuid())
-  value    Float
-  planType String?
-  paidAt   DateTime @default(now())
+  id            String         @id @default(cuid())
+  value         Float
+  planType      String?
+  paymentMethod PaymentMethod?
+  paidAt        DateTime       @default(now())
 
   dealId String
   deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)

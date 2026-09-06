@@ -53,6 +53,13 @@ export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   DESAFIO_30: "Desafio de 30 dias",
 };
 
+export const PAYMENT_METHODS = ["CREDIT_CARD", "PIX"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  CREDIT_CARD: "Cartão de Crédito",
+  PIX: "Pix",
+};
+
 export enum SessionStatus {
   PENDING = "PENDING",
   CONNECTED = "CONNECTED",
