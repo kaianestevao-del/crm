@@ -31,11 +31,38 @@ function formatPairingCode(code: string) {
   return code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
 }
 
-function WaLinkGenerator({ phoneNumber }: { phoneNumber: string }) {
-  const [message, setMessage] = useState("");
-  const [copied, setCopied] = useState(false);
+interface CustomLink {
+  id: string;
+  name: string;
+  message: string;
+}
 
-  const link = `https://wa.me/${phoneNumber}${message.trim() ? `?text=${encodeURIComponent(message.trim())}` : ""}`;
+function buildWaLink(phoneNumber: string, message: string) {
+  return `https://wa.me/${phoneNumber}${message.trim() ? `?text=${encodeURIComponent(message.trim())}` : ""}`;
+}
+
+// Saved locally in the browser (no backend/DB involved) — one list of link presets per
+// WhatsApp connection, so a person setting up multiple links (bio, ads, etc.) doesn't have to
+// retype the message every time. Lives only on this device/browser.
+function loadSavedLinks(sessionId: string): CustomLink[] {
+  try {
+    const raw = localStorage.getItem(`wa-custom-links:${sessionId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedLinks(sessionId: string, links: CustomLink[]) {
+  try {
+    localStorage.setItem(`wa-custom-links:${sessionId}`, JSON.stringify(links));
+  } catch {
+    // Storage unavailable (private mode, quota) — links just won't persist across reloads.
+  }
+}
+
+function CopyLinkButton({ link }: { link: string }) {
+  const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
     try {
@@ -48,25 +75,88 @@ function WaLinkGenerator({ phoneNumber }: { phoneNumber: string }) {
   }
 
   return (
+    <button
+      onClick={handleCopy}
+      className="whitespace-nowrap rounded-md bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90"
+    >
+      {copied ? "Copiado!" : "Copiar link"}
+    </button>
+  );
+}
+
+function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneNumber: string }) {
+  const [links, setLinks] = useState<CustomLink[]>(() => loadSavedLinks(sessionId));
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState("");
+
+  function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    const next = [...links, { id: crypto.randomUUID(), name: name.trim(), message: message.trim() }];
+    setLinks(next);
+    saveSavedLinks(sessionId, next);
+    setName("");
+    setMessage("");
+  }
+
+  function handleDelete(id: string) {
+    const next = links.filter((l) => l.id !== id);
+    setLinks(next);
+    saveSavedLinks(sessionId, next);
+  }
+
+  return (
     <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-      <label className="mb-1 block text-xs font-medium text-gray-600">Mensagem pré-preenchida (opcional)</label>
-      <input
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        placeholder="Ex: Olá! Vim pelo Instagram e quero saber mais..."
-        className="mb-2 w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
-      />
-      <div className="flex items-center gap-2">
-        <input readOnly value={link} className="flex-1 truncate rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-600" />
+      <form onSubmit={handleCreate} className="mb-3 space-y-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nome do link (ex: Bio do Instagram, Anúncio de setembro)"
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+        />
+        <input
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Mensagem pré-preenchida (opcional)"
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+        />
         <button
-          onClick={handleCopy}
-          className="whitespace-nowrap rounded-md bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90"
+          type="submit"
+          disabled={!name.trim()}
+          className="rounded-md bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {copied ? "Copiado!" : "Copiar link"}
+          Salvar link
         </button>
-      </div>
-      <p className="mt-1 text-[10px] text-gray-400">
-        Compartilhe esse link (bio, site, anúncios) para que qualquer pessoa abra uma conversa com este número no WhatsApp.
+      </form>
+
+      {links.length === 0 ? (
+        <p className="text-xs text-gray-400">Nenhum link salvo ainda para este número.</p>
+      ) : (
+        <ul className="space-y-2">
+          {links.map((link) => (
+            <li key={link.id} className="rounded-md border border-gray-200 bg-white p-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="truncate text-xs font-medium text-gray-700">{link.name}</p>
+                <button onClick={() => handleDelete(link.id)} className="text-[10px] font-medium text-red-600 hover:underline">
+                  Apagar
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={buildWaLink(phoneNumber, link.message)}
+                  className="flex-1 truncate rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-600"
+                />
+                <CopyLinkButton link={buildWaLink(phoneNumber, link.message)} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-2 text-[10px] text-gray-400">
+        Salve um link por canal (bio, site, Instagram) para que qualquer pessoa abra uma conversa com este número no
+        WhatsApp já com a mensagem certa preenchida. Os links ficam salvos neste navegador.
       </p>
     </div>
   );
@@ -336,7 +426,7 @@ export function ConnectWhatsappPage() {
                   onClick={() => setLinkGeneratorFor((v) => (v === session.id ? null : session.id))}
                   className="text-xs font-medium text-brand-dark hover:underline"
                 >
-                  🔗 Gerar link wa.me
+                  🔗 Links personalizados
                 </button>
               )}
               {session.provider === "BAILEYS" && session.status === SessionStatus.CONNECTED && (
@@ -360,7 +450,9 @@ export function ConnectWhatsappPage() {
                 </button>
               )}
             </div>
-            {session.phoneNumber && linkGeneratorFor === session.id && <WaLinkGenerator phoneNumber={session.phoneNumber} />}
+            {session.phoneNumber && linkGeneratorFor === session.id && (
+              <WaLinkGenerator sessionId={session.id} phoneNumber={session.phoneNumber} />
+            )}
           </div>
         ))}
         {sessions.length === 0 && (
