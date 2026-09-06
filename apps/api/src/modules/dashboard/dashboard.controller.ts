@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { MONTH_NAMES_PT, ORIGIN_TAGS_PT } from "@crm/shared";
 import { prisma } from "../../prisma";
 
 export async function getDashboardSummary(req: Request, res: Response) {
@@ -206,24 +207,7 @@ async function getFollowUpOutcomes(organizationId: string) {
   };
 }
 
-const MONTH_NAMES_PT = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
 const OLDER_BUCKET_LABEL = "2025 ou antes";
-
-// Canonical acquisition-channel tags used across the CRM to mark how a lead arrived
-// (as opposed to "objetivo" tags like Emagrecimento or status tags like Paciente Ativa).
-const ORIGIN_TAGS_PT = [
-  "Link na Bio do Instagram",
-  "Social Selling Instagram",
-  "Social Selling WhatsApp",
-  "Site",
-  "Tráfego Pago",
-  "Diagnóstico Nutricional",
-  "Indicação",
-  "Parcerias Médicas",
-];
 const OTHER_ORIGIN_LABEL = "Outra origem";
 
 // Groups contacts by their "Mês/Ano" tag (e.g. "Setembro/2026") — set automatically on first
@@ -323,7 +307,7 @@ async function getMonthlyCohorts(organizationId: string) {
       const [aMonth, aYear] = a.label.split("/");
       const [bMonth, bYear] = b.label.split("/");
       if (aYear !== bYear) return Number(aYear) - Number(bYear);
-      return MONTH_NAMES_PT.indexOf(aMonth) - MONTH_NAMES_PT.indexOf(bMonth);
+      return (MONTH_NAMES_PT as readonly string[]).indexOf(aMonth) - (MONTH_NAMES_PT as readonly string[]).indexOf(bMonth);
     });
   return sorted;
 }

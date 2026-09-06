@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
 import { api } from "../lib/api";
 
 export interface Tag {
@@ -43,11 +44,15 @@ export function ContactTags({
     setShowCreate(false);
   }
 
-  const availableTags = allTags.filter((t) => !tags.some((selected) => selected.id === t.id));
+  // Mês/ano de chegada and origem tags now have dedicated pickers in the Timeline (below) —
+  // hidden here so agents aren't choosing them from this flat, unrelated list anymore.
+  const isTimelineTag = (name: string) => isMonthYearTagName(name) || (ORIGIN_TAGS_PT as readonly string[]).includes(name);
+  const objectiveTags = tags.filter((t) => !isTimelineTag(t.name));
+  const availableTags = allTags.filter((t) => !isTimelineTag(t.name) && !tags.some((selected) => selected.id === t.id));
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {tags.map((tag) => (
+      {objectiveTags.map((tag) => (
         <span key={tag.id} className="flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand-dark">
           {tag.name}
           <button onClick={() => removeTag(tag.id)} className="text-brand-dark/60 hover:text-brand-dark">
@@ -63,7 +68,7 @@ export function ContactTags({
         }}
         className="rounded-full border border-dashed border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50 focus:border-brand focus:outline-none"
       >
-        <option value="">+ Aba</option>
+        <option value="">+ Objetivo</option>
         {availableTags.map((tag) => (
           <option key={tag.id} value={tag.id}>
             {tag.name}
@@ -78,7 +83,7 @@ export function ContactTags({
             value={newTagName}
             onChange={(e) => setNewTagName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && createAndAddTag()}
-            placeholder="Nome da aba..."
+            placeholder="Nome do objetivo..."
             className="w-32 rounded-md border border-gray-300 px-2 py-0.5 text-xs focus:border-brand focus:outline-none"
           />
           <button onClick={createAndAddTag} className="text-xs font-medium text-brand-dark hover:underline">
@@ -89,7 +94,7 @@ export function ContactTags({
           </button>
         </span>
       ) : (
-        <button onClick={() => setShowCreate(true)} className="text-xs text-gray-400 hover:text-gray-600" title="Criar nova aba">
+        <button onClick={() => setShowCreate(true)} className="text-xs text-gray-400 hover:text-gray-600" title="Criar novo objetivo">
           + nova
         </button>
       )}

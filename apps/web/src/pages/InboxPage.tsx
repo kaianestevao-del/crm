@@ -6,6 +6,7 @@ import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
+import { ContactTimeline } from "../components/ContactTimeline";
 import { ContactWhatsappLabels, WhatsappLabel } from "../components/ContactWhatsappLabels";
 import { ContactDeal } from "../components/ContactDeal";
 import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
@@ -486,6 +487,17 @@ export function InboxPage() {
                     <ScheduledMessages conversationId={selectedConversation.id} onClose={() => setShowScheduledMessages(false)} />
                   )}
                 </div>
+              </div>
+              <div className="mt-2">
+                <ContactTimeline
+                  contactId={selectedConversation.contact.id}
+                  tags={selectedConversation.contact.tags}
+                  onChange={(tags) =>
+                    setConversations((prev) =>
+                      prev.map((c) => (c.id === selectedConversation.id ? { ...c, contact: { ...c.contact, tags } } : c)),
+                    )
+                  }
+                />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 <ContactTags

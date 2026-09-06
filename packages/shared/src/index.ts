@@ -60,6 +60,33 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   PIX: "Pix",
 };
 
+// A contact's arrival month is stored as a single "Mês/Ano" Tag (e.g. "Setembro/2026") — set
+// automatically by the worker on first contact, and editable from the Timeline picker in the
+// conversation view. Shared so the worker (auto-tagging), API (Dashboard cohort query) and web
+// (Timeline picker, and filtering these out of the generic tag dropdown) all agree on the format.
+export const MONTH_NAMES_PT = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+] as const;
+
+export function isMonthYearTagName(name: string): boolean {
+  return new RegExp(`^(${MONTH_NAMES_PT.join("|")})/\\d{4}$`).test(name);
+}
+
+// Canonical acquisition-channel tags, applied from the Timeline picker (a contact can carry
+// more than one — they may have reached out through different channels over time). Anything
+// else falls into the Dashboard's "Outra origem" bucket.
+export const ORIGIN_TAGS_PT = [
+  "Link na Bio do Instagram",
+  "Social Selling Instagram",
+  "Social Selling WhatsApp",
+  "Site",
+  "Tráfego Pago",
+  "Diagnóstico Nutricional",
+  "Indicação",
+  "Parcerias Médicas",
+] as const;
+
 export enum SessionStatus {
   PENDING = "PENDING",
   CONNECTED = "CONNECTED",

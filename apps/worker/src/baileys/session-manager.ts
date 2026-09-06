@@ -15,7 +15,7 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode";
 import pino from "pino";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType, SessionStatus } from "@crm/db";
-import type { OutboundMessageJob, InboundCloudMessageJob } from "@crm/shared";
+import { MONTH_NAMES_PT, type OutboundMessageJob, type InboundCloudMessageJob } from "@crm/shared";
 import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
@@ -553,11 +553,6 @@ async function maybeAutoTag(organizationId: string, contactId: string, text: str
 
   publishRealtimeEvent({ type: "contact.updated", organizationId, contactId });
 }
-
-const MONTH_NAMES_PT = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
 
 // Tags a brand-new contact with the month/year they first showed up (e.g. "Setembro/2026"),
 // so leads can be grouped by arrival cohort without relying on autoatendimento (keyword-only,
