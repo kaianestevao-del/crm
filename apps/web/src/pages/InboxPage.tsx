@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageDirection, MessageType, isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
+import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
@@ -41,11 +41,45 @@ interface Message {
   conversationId: string;
   direction: MessageDirection;
   type: MessageType;
+  status: MessageStatus;
   content: string | null;
   mediaUrl: string | null;
   transcript: string | null;
   revokedAt: string | null;
   createdAt: string;
+}
+
+const STATUS_ICON: Record<MessageStatus, string> = {
+  [MessageStatus.PENDING]: "🕓",
+  [MessageStatus.SENT]: "✓",
+  [MessageStatus.DELIVERED]: "✓✓",
+  [MessageStatus.READ]: "✓✓",
+  [MessageStatus.FAILED]: "⚠️",
+};
+
+const STATUS_TITLE: Record<MessageStatus, string> = {
+  [MessageStatus.PENDING]: "Enviando...",
+  [MessageStatus.SENT]: "Enviada",
+  [MessageStatus.DELIVERED]: "Entregue",
+  [MessageStatus.READ]: "Lida",
+  [MessageStatus.FAILED]: "Falha ao enviar",
+};
+
+function MessageStatusIndicator({ status }: { status: MessageStatus }) {
+  return (
+    <span
+      title={STATUS_TITLE[status]}
+      className={`ml-1 text-[11px] ${
+        status === MessageStatus.FAILED
+          ? "text-red-300"
+          : status === MessageStatus.READ
+            ? "text-sky-300"
+            : "text-white/70"
+      }`}
+    >
+      {STATUS_ICON[status]}
+    </span>
+  );
 }
 
 const MEDIA_PREVIEW_LABEL: Partial<Record<MessageType, string>> = {
@@ -102,6 +136,12 @@ function MessageBubble({ message }: { message: Message }) {
         </a>
       )}
       {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
+      {outbound && (
+        <p className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-white/70">
+          {message.status === MessageStatus.FAILED && <span>Falha ao enviar</span>}
+          <MessageStatusIndicator status={message.status} />
+        </p>
+      )}
     </div>
   );
 }

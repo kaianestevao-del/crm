@@ -144,8 +144,18 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
           status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED,
         });
 
+        // A QR/pairing code that nobody ever scanned times out with the same statusCode (408)
+        // Baileys also uses for "connection dropped mid-session" — without telling these apart,
+        // an abandoned pairing attempt reconnects, regenerates a QR, times out, and repeats
+        // forever (every 5s, indefinitely) instead of just sitting disconnected until an
+        // attendant is ready to actually scan it via "Reiniciar".
+        const neverPaired = !state.creds.registered;
+        const qrTimedOut = statusCode === DisconnectReason.timedOut || statusCode === DisconnectReason.connectionLost;
+
         if (loggedOut) {
           await fs.rm(sessionDir(sessionId), { recursive: true, force: true }).catch(() => {});
+        } else if (neverPaired && qrTimedOut) {
+          console.warn(`session_abandoned_pairing:${sessionId} — not auto-reconnecting, use Reiniciar when ready`);
         } else if (!reconnecting.has(sessionId)) {
           reconnecting.add(sessionId);
           setTimeout(() => {
@@ -185,25 +195,37 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
 
   // Fires when a message is deleted — including "delete for everyone". We deliberately never
   // touch `content`/`mediaUrl` on our own copy; we only flag it as revoked so the attendant
-  // can still read what was sent.
+  // can still read what was sent. Also carries delivery/read receipts for messages we sent
+  // (update.status) — without handling those, an outbound message sits at SENT forever in the
+  // UI even once the customer's phone confirms delivery or the number turns out unreachable.
   sock.ev.on("messages.update", async (updates) => {
     for (const { key, update } of updates) {
-      if (update.messageStubType !== WAMessageStubType.REVOKE || !key.id) continue;
-      try {
-        const existing = await prisma.message.findFirst({ where: { waMessageId: key.id } });
-        if (!existing || existing.revokedAt) continue;
-        const revoked = await prisma.message.update({
-          where: { id: existing.id },
-          data: { revokedAt: new Date() },
-        });
-        publishRealtimeEvent({
-          type: "message.updated",
-          organizationId: session.organizationId,
-          conversationId: revoked.conversationId,
-          message: revoked,
-        });
-      } catch (err) {
-        console.error("mark_revoked_error", err);
+      if (!key.id) continue;
+
+      if (update.messageStubType === WAMessageStubType.REVOKE) {
+        try {
+          const existing = await prisma.message.findFirst({ where: { waMessageId: key.id } });
+          if (!existing || existing.revokedAt) continue;
+          const revoked = await prisma.message.update({
+            where: { id: existing.id },
+            data: { revokedAt: new Date() },
+          });
+          publishRealtimeEvent({
+            type: "message.updated",
+            organizationId: session.organizationId,
+            conversationId: revoked.conversationId,
+            message: revoked,
+          });
+        } catch (err) {
+          console.error("mark_revoked_error", err);
+        }
+        continue;
+      }
+
+      if (update.status != null) {
+        await applyMessageStatusUpdate(session.organizationId, key.id, baileysStatusToOurs(update.status)).catch(
+          (err) => console.error("apply_message_status_error", err),
+        );
       }
     }
   });
@@ -586,27 +608,6 @@ function detectMessageType(msg: proto.IWebMessageInfo): MessageType {
   return MessageType.UNKNOWN;
 }
 
-export async function sendTextMessage(sessionId: string, waJid: string, text: string, messageId?: string) {
-  try {
-    const sock = activeSockets.get(sessionId);
-    if (!sock) throw new Error(`session_not_connected:${sessionId}`);
-
-    const result = await sock.sendMessage(waJid, { text });
-    if (messageId) {
-      await prisma.message.update({
-        where: { id: messageId },
-        data: { status: MessageStatus.SENT, waMessageId: result?.key.id ?? undefined },
-      });
-    }
-    return result;
-  } catch (err) {
-    if (messageId) {
-      await prisma.message.update({ where: { id: messageId }, data: { status: MessageStatus.FAILED } });
-    }
-    throw err;
-  }
-}
-
 const MIME_BY_EXTENSION: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -628,6 +629,45 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 function guessMimeType(name?: string): string {
   const ext = name?.split(".").pop()?.toLowerCase();
   return (ext && MIME_BY_EXTENSION[ext]) || "application/octet-stream";
+}
+
+// Shared by both providers' delivery-receipt handling below. Never lets a status regress
+// (e.g. a late-arriving DELIVERY_ACK after we've already seen READ) except FAILED, which always
+// wins since Meta/WhatsApp reporting a real failure matters regardless of ordering.
+const MESSAGE_STATUS_RANK: Record<MessageStatus, number> = {
+  [MessageStatus.PENDING]: 0,
+  [MessageStatus.SENT]: 1,
+  [MessageStatus.DELIVERED]: 2,
+  [MessageStatus.READ]: 3,
+  [MessageStatus.FAILED]: 4,
+};
+
+function baileysStatusToOurs(status: number): MessageStatus {
+  switch (status) {
+    case proto.WebMessageInfo.Status.DELIVERY_ACK:
+      return MessageStatus.DELIVERED;
+    case proto.WebMessageInfo.Status.READ:
+    case proto.WebMessageInfo.Status.PLAYED:
+      return MessageStatus.READ;
+    case proto.WebMessageInfo.Status.ERROR:
+      return MessageStatus.FAILED;
+    default:
+      return MessageStatus.SENT;
+  }
+}
+
+async function applyMessageStatusUpdate(organizationId: string, waMessageId: string, status: MessageStatus) {
+  const existing = await prisma.message.findFirst({ where: { waMessageId, direction: MessageDirection.OUTBOUND } });
+  if (!existing || existing.status === status) return;
+  if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[existing.status]) return;
+
+  const updated = await prisma.message.update({ where: { id: existing.id }, data: { status } });
+  publishRealtimeEvent({
+    type: "message.updated",
+    organizationId,
+    conversationId: updated.conversationId,
+    message: updated,
+  });
 }
 
 const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
@@ -659,69 +699,81 @@ async function sendCloudApiMessage(
   const data = (await res.json()) as { messages?: { id: string }[] };
   if (!res.ok) throw new Error(`cloud_api_send_failed:${JSON.stringify(data)}`);
 
-  await prisma.message.update({
-    where: { id: job.messageId },
-    data: { status: MessageStatus.SENT, waMessageId: data.messages?.[0]?.id },
-  });
+  return data.messages?.[0]?.id;
+}
+
+// Deliberately two separate try/catches: only a failure in the network call above means the
+// message never reached the customer, so only that one is allowed to mark the message FAILED
+// (and let the caller retry). Once WhatsApp/Meta has accepted the send, a hiccup persisting the
+// result (a DB blip) must never look like a send failure — retrying from there would resend a
+// message the customer already received, which is worse than an attendant seeing a stale ✓.
+export async function sendOutboundMessage(job: OutboundMessageJob) {
+  const session = await prisma.whatsappSession.findUniqueOrThrow({ where: { id: job.sessionId } });
+  let waMessageId: string | undefined;
+
+  try {
+    if (session.provider === "CLOUD_API") {
+      if (!session.cloudApiPhoneNumberId || !session.cloudApiAccessToken) {
+        throw new Error(`cloud_api_not_configured:${job.sessionId}`);
+      }
+      waMessageId = await sendCloudApiMessage(job, {
+        cloudApiPhoneNumberId: session.cloudApiPhoneNumberId,
+        cloudApiAccessToken: session.cloudApiAccessToken,
+      });
+    } else {
+      const sock = activeSockets.get(job.sessionId);
+      if (!sock) throw new Error(`session_not_connected:${job.sessionId}`);
+
+      const mimetype = guessMimeType(job.mediaName ?? job.mediaUrl);
+      let content: Parameters<WASocket["sendMessage"]>[1];
+
+      if (job.mediaType === "IMAGE" && job.mediaUrl) {
+        content = { image: { url: job.mediaUrl }, mimetype, caption: job.text };
+      } else if (job.mediaType === "VIDEO" && job.mediaUrl) {
+        content = { video: { url: job.mediaUrl }, mimetype, caption: job.text };
+      } else if (job.mediaType === "AUDIO" && job.mediaUrl) {
+        // WhatsApp audio messages don't support a caption, so the signature (folded into `text`
+        // by the API) is dropped here — there is nowhere for it to be shown.
+        content = { audio: { url: job.mediaUrl }, mimetype, ptt: false };
+      } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
+        content = { document: { url: job.mediaUrl }, mimetype, fileName: job.mediaName ?? "arquivo", caption: job.text };
+      } else {
+        content = { text: job.text ?? "" };
+      }
+
+      const result = await sock.sendMessage(job.waJid, content);
+      waMessageId = result?.key.id ?? undefined;
+    }
+  } catch (err) {
+    const failed = await prisma.message.update({ where: { id: job.messageId }, data: { status: MessageStatus.FAILED } });
+    publishRealtimeEvent({
+      type: "message.updated",
+      organizationId: job.organizationId,
+      conversationId: job.conversationId,
+      message: failed,
+    });
+    throw err;
+  }
+
+  try {
+    const updated = await prisma.message.update({
+      where: { id: job.messageId },
+      data: { status: MessageStatus.SENT, waMessageId },
+    });
+    publishRealtimeEvent({
+      type: "message.updated",
+      organizationId: job.organizationId,
+      conversationId: job.conversationId,
+      message: updated,
+    });
+  } catch (err) {
+    console.error("record_sent_message_failed", err);
+  }
 
   if (job.mediaType === "AUDIO" && job.mediaUrl) {
     await transcribeAudioQueue
       .add("transcribe", { organizationId: job.organizationId, messageId: job.messageId, mediaUrl: job.mediaUrl })
       .catch((err) => console.error("enqueue_transcription_failed", err));
-  }
-}
-
-export async function sendOutboundMessage(job: OutboundMessageJob) {
-  try {
-    const session = await prisma.whatsappSession.findUniqueOrThrow({ where: { id: job.sessionId } });
-
-    if (session.provider === "CLOUD_API") {
-      if (!session.cloudApiPhoneNumberId || !session.cloudApiAccessToken) {
-        throw new Error(`cloud_api_not_configured:${job.sessionId}`);
-      }
-      await sendCloudApiMessage(job, {
-        cloudApiPhoneNumberId: session.cloudApiPhoneNumberId,
-        cloudApiAccessToken: session.cloudApiAccessToken,
-      });
-      return;
-    }
-
-    const sock = activeSockets.get(job.sessionId);
-    if (!sock) throw new Error(`session_not_connected:${job.sessionId}`);
-
-    const mimetype = guessMimeType(job.mediaName ?? job.mediaUrl);
-    let content: Parameters<WASocket["sendMessage"]>[1];
-
-    if (job.mediaType === "IMAGE" && job.mediaUrl) {
-      content = { image: { url: job.mediaUrl }, mimetype, caption: job.text };
-    } else if (job.mediaType === "VIDEO" && job.mediaUrl) {
-      content = { video: { url: job.mediaUrl }, mimetype, caption: job.text };
-    } else if (job.mediaType === "AUDIO" && job.mediaUrl) {
-      // WhatsApp audio messages don't support a caption, so the signature (folded into `text`
-      // by the API) is dropped here — there is nowhere for it to be shown.
-      content = { audio: { url: job.mediaUrl }, mimetype, ptt: false };
-    } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
-      content = { document: { url: job.mediaUrl }, mimetype, fileName: job.mediaName ?? "arquivo", caption: job.text };
-    } else {
-      content = { text: job.text ?? "" };
-    }
-
-    const result = await sock.sendMessage(job.waJid, content);
-    await prisma.message.update({
-      where: { id: job.messageId },
-      data: { status: MessageStatus.SENT, waMessageId: result?.key.id ?? undefined },
-    });
-
-    if (job.mediaType === "AUDIO" && job.mediaUrl) {
-      await transcribeAudioQueue
-        .add("transcribe", { organizationId: job.organizationId, messageId: job.messageId, mediaUrl: job.mediaUrl })
-        .catch((err) => console.error("enqueue_transcription_failed", err));
-    }
-
-    return result;
-  } catch (err) {
-    await prisma.message.update({ where: { id: job.messageId }, data: { status: MessageStatus.FAILED } });
-    throw err;
   }
 }
 
@@ -784,9 +836,29 @@ interface CloudApiMessage {
   document?: { id: string; filename?: string; caption?: string; mime_type?: string };
 }
 
+interface CloudApiStatus {
+  id: string;
+  status: "sent" | "delivered" | "read" | "failed";
+  errors?: { title?: string; message?: string }[];
+}
+
 interface CloudApiWebhookValue {
   contacts?: { profile?: { name?: string }; wa_id?: string }[];
   messages?: CloudApiMessage[];
+  statuses?: CloudApiStatus[];
+}
+
+function cloudStatusToOurs(status: CloudApiStatus["status"]): MessageStatus {
+  switch (status) {
+    case "delivered":
+      return MessageStatus.DELIVERED;
+    case "read":
+      return MessageStatus.READ;
+    case "failed":
+      return MessageStatus.FAILED;
+    default:
+      return MessageStatus.SENT;
+  }
 }
 
 // Called from the worker's inbound-cloud-messages queue processor — the API's webhook route
@@ -794,7 +866,17 @@ interface CloudApiWebhookValue {
 // happens here so it goes through the exact same path as every Baileys-sourced message.
 export async function processInboundCloudMessage(job: InboundCloudMessageJob) {
   const value = job.payload as CloudApiWebhookValue;
-  if (!value.messages?.length) return; // delivery-status-only webhook, nothing to record
+
+  for (const status of value.statuses ?? []) {
+    await applyMessageStatusUpdate(job.organizationId, status.id, cloudStatusToOurs(status.status)).catch((err) =>
+      console.error("apply_cloud_message_status_error", err),
+    );
+    if (status.status === "failed" && status.errors?.length) {
+      console.error("cloud_api_message_failed", { waMessageId: status.id, errors: status.errors });
+    }
+  }
+
+  if (!value.messages?.length) return; // status-only webhook, nothing left to record
 
   const session = await prisma.whatsappSession.findUniqueOrThrow({ where: { id: job.sessionId } });
   const pushName = value.contacts?.[0]?.profile?.name;
