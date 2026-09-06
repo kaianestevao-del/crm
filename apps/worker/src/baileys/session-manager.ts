@@ -745,6 +745,7 @@ export async function sendOutboundMessage(job: OutboundMessageJob) {
       waMessageId = result?.key.id ?? undefined;
     }
   } catch (err) {
+    console.error(`outbound_message_send_failed:${job.messageId}`, err);
     const failed = await prisma.message.update({ where: { id: job.messageId }, data: { status: MessageStatus.FAILED } });
     publishRealtimeEvent({
       type: "message.updated",
