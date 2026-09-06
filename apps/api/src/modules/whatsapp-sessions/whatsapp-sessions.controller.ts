@@ -45,3 +45,9 @@ export async function logoutSession(req: Request, res: Response) {
   await sessionCommandsQueue.add("logout", { sessionId: session.id, command: "LOGOUT" });
   res.json({ ok: true });
 }
+
+export async function resyncLabels(req: Request, res: Response) {
+  const session = await getOwnedSession(req.auth!.organizationId, req.params.id);
+  await sessionCommandsQueue.add("resync-labels", { sessionId: session.id, command: "RESYNC_LABELS" });
+  res.json({ ok: true });
+}

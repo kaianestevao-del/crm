@@ -124,6 +124,10 @@ export function ConnectWhatsappPage() {
     await api.post(`/whatsapp-sessions/${id}/logout`);
   }
 
+  async function handleResyncLabels(id: string) {
+    await api.post(`/whatsapp-sessions/${id}/resync-labels`);
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="mb-1 text-lg font-semibold">Conexão com o WhatsApp</h1>
@@ -173,6 +177,11 @@ export function ConnectWhatsappPage() {
                   className="text-xs font-medium text-brand-dark hover:underline"
                 >
                   🔗 Gerar link wa.me
+                </button>
+              )}
+              {session.status === SessionStatus.CONNECTED && (
+                <button onClick={() => handleResyncLabels(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
+                  🔄 Ressincronizar etiquetas
                 </button>
               )}
             </div>

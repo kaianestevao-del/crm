@@ -79,7 +79,7 @@ export interface OutboundMessageJob {
   mediaName?: string;
 }
 
-export type SessionCommand = "START" | "LOGOUT" | "RESTART";
+export type SessionCommand = "START" | "LOGOUT" | "RESTART" | "RESYNC_LABELS";
 
 export interface SessionCommandJob {
   sessionId: string;

@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import { QUEUE_SESSION_COMMANDS, SessionCommandJob } from "@crm/shared";
 import { createRedisClient } from "../redis";
-import { startSession, restartSession, logoutSession } from "../baileys/session-manager";
+import { startSession, restartSession, logoutSession, resyncLabels } from "../baileys/session-manager";
 
 export function createSessionCommandsWorker() {
   return new Worker<SessionCommandJob>(
@@ -11,6 +11,7 @@ export function createSessionCommandsWorker() {
       if (command === "START") return startSession(sessionId);
       if (command === "RESTART") return restartSession(sessionId);
       if (command === "LOGOUT") return logoutSession(sessionId);
+      if (command === "RESYNC_LABELS") return resyncLabels(sessionId);
     },
     { connection: createRedisClient() },
   );

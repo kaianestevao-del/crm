@@ -245,6 +245,18 @@ export async function createWhatsappLabel(sessionId: string, name: string, color
   await sock.addLabel(sock.user.id, { id: String(nextId), name, color, deleted: false });
 }
 
+// Baileys only pulls the account's *entire* label set automatically once, right after a fresh
+// QR pairing (when it first receives the app-state encryption key). A plain reconnect — or
+// pairing while a duplicate worker process is also racing to sync the same account, which is
+// what actually happened here — never repeats that full sync, so labels that already existed
+// before pairing can end up silently missing. This re-runs that same sync on demand, without
+// requiring the user to log out and re-scan a QR code.
+export async function resyncLabels(sessionId: string) {
+  const sock = activeSockets.get(sessionId);
+  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
+  await sock.resyncAppState(["critical_block", "critical_unblock_low", "regular_high", "regular_low", "regular"], true);
+}
+
 const EXTENSION_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
