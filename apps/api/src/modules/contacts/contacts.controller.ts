@@ -164,13 +164,25 @@ export async function removeContactWhatsappLabel(req: Request, res: Response) {
   res.status(202).json({ ok: true });
 }
 
+// Optional ?tagIds=a,b,c — when present, only contacts carrying at least one of those tags
+// (any tag type: objetivo, origem, or mês/ano) are exported. Absent/empty means "download all".
 export async function exportContacts(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
+  const tagIdsParam = typeof req.query.tagIds === "string" ? req.query.tagIds : "";
+  const tagIds = tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
+
   const contacts = await prisma.contact.findMany({
-    where: { organizationId },
+    where: {
+      organizationId,
+      ...(tagIds.length > 0 ? { tags: { some: { tagId: { in: tagIds } } } } : {}),
+    },
     include: {
       tags: { include: { tag: true } },
       whatsappLabels: { include: { label: true } },
+      deals: {
+        include: { payments: true, stage: true },
+        orderBy: { createdAt: "desc" },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -182,16 +194,26 @@ export async function exportContacts(req: Request, res: Response) {
     { header: "Telefone", key: "phoneNumber", width: 18 },
     { header: "Abas (CRM)", key: "tags", width: 30 },
     { header: "Etiquetas do WhatsApp", key: "whatsappLabels", width: 30 },
+    { header: "Comprou", key: "purchased", width: 10 },
+    { header: "Valor total pago", key: "totalPaid", width: 16 },
+    { header: "Etapa do funil", key: "stage", width: 20 },
     { header: "Criado em", key: "createdAt", width: 20 },
   ];
   sheet.getRow(1).font = { bold: true };
 
   for (const contact of contacts) {
+    const totalPaid = contact.deals.reduce(
+      (sum, deal) => sum + deal.payments.reduce((s, p) => s + p.value, 0),
+      0,
+    );
     sheet.addRow({
       name: contact.name ?? "",
       phoneNumber: `+${contact.phoneNumber}`,
       tags: contact.tags.map((t) => t.tag.name).join(", "),
       whatsappLabels: contact.whatsappLabels.map((l) => l.label.name).join(", "),
+      purchased: totalPaid > 0 ? "Sim" : "Não",
+      totalPaid,
+      stage: contact.deals[0]?.stage.name ?? "",
       createdAt: contact.createdAt.toLocaleString("pt-BR"),
     });
   }

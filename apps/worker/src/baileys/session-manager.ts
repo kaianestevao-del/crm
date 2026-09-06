@@ -414,9 +414,11 @@ async function upsertContactAndRecordMessage(
 
   const conversation = await prisma.conversation.upsert({
     where: { whatsappSessionId_contactId: { whatsappSessionId: sessionId, contactId: contact.id } },
+    // status: "OPEN" un-hides a conversation the attendant "deleted" (soft-closed) from the
+    // inbox — a real inbound message means it belongs back in the list.
     update:
       !opts.isHistorical && !fromMe
-        ? { lastMessageAt: messageDate, unreadCount: { increment: 1 } }
+        ? { lastMessageAt: messageDate, unreadCount: { increment: 1 }, status: "OPEN" }
         : {},
     create: {
       organizationId,

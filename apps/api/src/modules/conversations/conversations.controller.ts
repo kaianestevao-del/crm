@@ -10,7 +10,9 @@ import { outboundMessagesQueue } from "../../queues";
 export async function listConversations(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const conversations = await prisma.conversation.findMany({
-    where: { organizationId },
+    // CLOSED = the attendant "deleted" it from the inbox (see closeConversation below) — it
+    // comes back on its own the next time the contact writes in (see session-manager.ts).
+    where: { organizationId, status: "OPEN" },
     include: {
       contact: { include: { tags: { include: { tag: true } }, whatsappLabels: { include: { label: true } } } },
       assignedUser: { select: { id: true, name: true } },
@@ -228,6 +230,21 @@ export async function sendAttachment(req: Request, res: Response) {
 export async function markAsRead(req: Request, res: Response) {
   const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { unreadCount: 0 } });
+  res.json({ ok: true });
+}
+
+export async function markAsUnread(req: Request, res: Response) {
+  const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { unreadCount: 1 } });
+  res.json({ ok: true });
+}
+
+// Soft-delete only — hides the conversation from the inbox list, but every Message stays in
+// the database. Reappears on its own (status flips back to OPEN) the next time the contact
+// sends a message — see the conversation.upsert in session-manager.ts.
+export async function closeConversation(req: Request, res: Response) {
+  const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "CLOSED" } });
   res.json({ ok: true });
 }
 

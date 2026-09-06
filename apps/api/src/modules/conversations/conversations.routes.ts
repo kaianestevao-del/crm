@@ -9,6 +9,8 @@ import {
   sendMessage,
   sendAttachment,
   markAsRead,
+  markAsUnread,
+  closeConversation,
   assignConversation,
   exportConversation,
   startConversation,
@@ -24,5 +26,7 @@ conversationsRouter.get("/:id/messages", asyncHandler(listMessages));
 conversationsRouter.post("/:id/messages", asyncHandler(sendMessage));
 conversationsRouter.post("/:id/attachments", uploadMessageAttachment.single("file"), asyncHandler(sendAttachment));
 conversationsRouter.post("/:id/read", asyncHandler(markAsRead));
+conversationsRouter.post("/:id/unread", asyncHandler(markAsUnread));
+conversationsRouter.delete("/:id", asyncHandler(closeConversation));
 conversationsRouter.post("/:id/assign", asyncHandler(assignConversation));
 conversationsRouter.get("/:id/export", asyncHandler(exportConversation));

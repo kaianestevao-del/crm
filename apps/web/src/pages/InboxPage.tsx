@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageDirection, MessageType } from "@crm/shared";
+import { MessageDirection, MessageType, isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
@@ -17,7 +17,6 @@ import { AudioRecorderBar } from "../components/AudioRecorderBar";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { NewConversationModal } from "../components/NewConversationModal";
 import { ScheduledMessages } from "../components/ScheduledMessages";
-import { downloadFile } from "../lib/download";
 
 interface Contact {
   id: string;
@@ -123,7 +122,14 @@ export function InboxPage() {
   const [showTranscriptionSettings, setShowTranscriptionSettings] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickReply | null>(null);
-  const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
+  const [originFilter, setOriginFilter] = useState<Set<string>>(new Set());
+  const [monthFilter, setMonthFilter] = useState<Set<string>>(new Set());
+  const [objetivoFilter, setObjetivoFilter] = useState<Set<string>>(new Set());
+  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  const [confirmDeleteConversationFor, setConfirmDeleteConversationFor] = useState<string | null>(null);
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
   const [search, setSearch] = useState("");
@@ -307,20 +313,52 @@ export function InboxPage() {
     await selectConversation(conversationId);
   }
 
-  function toggleTagFilter(tagId: string) {
-    setTagFilter((prev) => {
+  function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
+    setter((prev) => {
       const next = new Set(prev);
-      if (next.has(tagId)) next.delete(tagId);
-      else next.add(tagId);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
       return next;
     });
   }
 
+  async function handleMarkUnread(conversationId: string) {
+    await api.post(`/conversations/${conversationId}/unread`);
+    setMenuOpenFor(null);
+    setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 1 } : c)));
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    await api.delete(`/conversations/${conversationId}`);
+    setMenuOpenFor(null);
+    setConfirmDeleteConversationFor(null);
+    if (selectedId === conversationId) setSelectedId(null);
+    setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+  }
+
   const allTags = Array.from(new Map(conversations.flatMap((c) => c.contact.tags).map((t) => [t.id, t])).values());
+  const allLabels = Array.from(
+    new Map(conversations.flatMap((c) => c.contact.whatsappLabels).map((l) => [l.id, l])).values(),
+  );
+  const isOriginTagName = (name: string) => (ORIGIN_TAGS_PT as readonly string[]).includes(name);
+  const originTags = allTags.filter((t) => isOriginTagName(t.name));
+  const monthTags = allTags.filter((t) => isMonthYearTagName(t.name));
+  const objetivoTags = allTags.filter((t) => !isOriginTagName(t.name) && !isMonthYearTagName(t.name));
+
+  const activeFilterCount =
+    (unreadOnly ? 1 : 0) +
+    (labelFilter.size > 0 ? 1 : 0) +
+    (originFilter.size > 0 ? 1 : 0) +
+    (monthFilter.size > 0 ? 1 : 0) +
+    (objetivoFilter.size > 0 ? 1 : 0);
 
   const normalizedSearch = search.trim().toLowerCase();
   const visibleConversations = conversations
-    .filter((c) => tagFilter.size === 0 || c.contact.tags.some((t) => tagFilter.has(t.id)))
+    .filter((c) => !unreadOnly || c.unreadCount > 0)
+    .filter((c) => labelFilter.size === 0 || c.contact.whatsappLabels.some((l) => labelFilter.has(l.id)))
+    .filter((c) => originFilter.size === 0 || c.contact.tags.some((t) => originFilter.has(t.id)))
+    .filter((c) => monthFilter.size === 0 || c.contact.tags.some((t) => monthFilter.has(t.id)))
+    .filter((c) => objetivoFilter.size === 0 || c.contact.tags.some((t) => objetivoFilter.has(t.id)))
     .filter(
       (c) =>
         !normalizedSearch ||
@@ -337,11 +375,12 @@ export function InboxPage() {
           <p className="text-sm font-semibold">Conversas</p>
           <div className="flex gap-2">
             <button
-              onClick={() => downloadFile("/contacts/export", "contatos.xlsx")}
-              title="Exportar contatos para XLSX"
-              className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              onClick={() => setShowFilters((v) => !v)}
+              className={`rounded-md border px-2 py-1 text-xs font-medium hover:bg-gray-50 ${
+                activeFilterCount > 0 ? "border-brand-dark text-brand-dark" : "border-gray-300 text-gray-600"
+              }`}
             >
-              ⬇️ Contatos
+              🔎 Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
             </button>
             <button
               onClick={() => setShowNewConversation(true)}
@@ -362,45 +401,178 @@ export function InboxPage() {
             />
           </div>
         </div>
-        {allTags.length > 0 && (
-          <div className="flex flex-wrap gap-1 border-b border-gray-100 p-2">
-            {allTags.map((tag) => (
+        {showFilters && (
+          <div className="space-y-2 border-b border-gray-100 p-2">
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
+              Apenas não lidas
+            </label>
+
+            {allLabels.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-400">Etiquetas</p>
+                <div className="flex flex-wrap gap-1">
+                  {allLabels.map((label) => (
+                    <button
+                      key={label.id}
+                      onClick={() => toggleInSet(setLabelFilter, label.id)}
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        labelFilter.has(label.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {label.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {originTags.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-400">Origem</p>
+                <div className="flex flex-wrap gap-1">
+                  {originTags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      onClick={() => toggleInSet(setOriginFilter, tag.id)}
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        originFilter.has(tag.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {monthTags.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-400">Mês</p>
+                <div className="flex flex-wrap gap-1">
+                  {monthTags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      onClick={() => toggleInSet(setMonthFilter, tag.id)}
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        monthFilter.has(tag.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {objetivoTags.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-gray-400">Objetivos</p>
+                <div className="flex flex-wrap gap-1">
+                  {objetivoTags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      onClick={() => toggleInSet(setObjetivoFilter, tag.id)}
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        objetivoFilter.has(tag.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeFilterCount > 0 && (
               <button
-                key={tag.id}
-                onClick={() => toggleTagFilter(tag.id)}
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  tagFilter.has(tag.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
-                }`}
+                onClick={() => {
+                  setUnreadOnly(false);
+                  setLabelFilter(new Set());
+                  setOriginFilter(new Set());
+                  setMonthFilter(new Set());
+                  setObjetivoFilter(new Set());
+                }}
+                className="text-xs text-gray-400 hover:underline"
               >
-                {tag.name}
+                Limpar filtros
               </button>
-            ))}
+            )}
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
           {visibleConversations.map((conversation) => (
-            <button
+            <div
               key={conversation.id}
-              onClick={() => selectConversation(conversation.id)}
-              className={`block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 ${
+              className={`group relative border-b border-gray-100 hover:bg-gray-50 ${
                 selectedId === conversation.id ? "bg-brand/5" : ""
               }`}
             >
-              <div className="flex items-center gap-2">
-                <ContactAvatar contact={conversation.contact} size={32} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className="truncate text-sm font-medium">{contactLabel(conversation.contact)}</p>
-                    {conversation.unreadCount > 0 && (
-                      <span className="rounded-full bg-brand-dark px-2 py-0.5 text-xs font-medium text-white">
-                        {conversation.unreadCount}
-                      </span>
-                    )}
+              <button onClick={() => selectConversation(conversation.id)} className="block w-full px-4 py-3 pr-9 text-left">
+                <div className="flex items-center gap-2">
+                  <ContactAvatar contact={conversation.contact} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <p className="truncate text-sm font-medium">{contactLabel(conversation.contact)}</p>
+                      {conversation.unreadCount > 0 && (
+                        <span className="rounded-full bg-brand-dark px-2 py-0.5 text-xs font-medium text-white">
+                          {conversation.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-gray-500">{messagePreview(conversation.messages[0])}</p>
                   </div>
-                  <p className="truncate text-xs text-gray-500">{messagePreview(conversation.messages[0])}</p>
                 </div>
-              </div>
-            </button>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpenFor((v) => (v === conversation.id ? null : conversation.id));
+                }}
+                className="absolute right-2 top-3 rounded px-1 text-gray-400 opacity-0 hover:bg-gray-200 group-hover:opacity-100"
+                title="Mais opções"
+              >
+                ⋮
+              </button>
+
+              {menuOpenFor === conversation.id && (
+                <div className="absolute right-2 top-9 z-10 w-48 rounded-md border border-gray-200 bg-white py-1 text-sm shadow-lg">
+                  <button
+                    onClick={() => handleMarkUnread(conversation.id)}
+                    className="block w-full px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50"
+                  >
+                    Marcar como não lida
+                  </button>
+                  {confirmDeleteConversationFor === conversation.id ? (
+                    <div className="px-3 py-1.5">
+                      <p className="mb-1 text-xs text-gray-500">Apagar esta conversa? As mensagens continuam salvas.</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDeleteConversation(conversation.id)}
+                          className="text-xs font-medium text-red-600 hover:underline"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteConversationFor(null)}
+                          className="text-xs text-gray-400 hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteConversationFor(conversation.id)}
+                      className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-gray-50"
+                    >
+                      Apagar conversa
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
           {visibleConversations.length === 0 && <p className="p-4 text-sm text-gray-500">Nenhuma conversa ainda.</p>}
         </div>
