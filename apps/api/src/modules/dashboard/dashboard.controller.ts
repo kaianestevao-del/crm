@@ -212,11 +212,27 @@ const MONTH_NAMES_PT = [
 ];
 const OLDER_BUCKET_LABEL = "2025 ou antes";
 
+// Canonical acquisition-channel tags used across the CRM to mark how a lead arrived
+// (as opposed to "objetivo" tags like Emagrecimento or status tags like Paciente Ativa).
+const ORIGIN_TAGS_PT = [
+  "Link na Bio do Instagram",
+  "Social Selling Instagram",
+  "Social Selling WhatsApp",
+  "Site",
+  "Tráfego Pago",
+  "Diagnóstico Nutricional",
+  "Indicação",
+  "Parcerias Médicas",
+];
+const OTHER_ORIGIN_LABEL = "Outra origem";
+
 // Groups contacts by their "Mês/Ano" tag (e.g. "Setembro/2026") — set automatically on first
 // contact (see the worker's tagContactWithArrivalMonth) or by the historical WaSpeed import —
 // rather than Contact.createdAt, which only reflects when the *row* was inserted (wrong for
 // anything bulk-imported). Any contact with none of these tags is assumed to predate the
-// month-tagging system entirely, i.e. arrived in "2025 ou antes".
+// month-tagging system entirely, i.e. arrived in "2025 ou antes". Each month row is further
+// broken down by acquisition-channel tag so the dashboard can drill down into "where did this
+// month's leads come from".
 async function getMonthlyCohorts(organizationId: string) {
   const monthNamesPattern = MONTH_NAMES_PT.join("|");
   const rows = await prisma.$queryRawUnsafe<{ label: string; totalLeads: bigint; convertedCount: bigint }[]>(
@@ -245,8 +261,62 @@ async function getMonthlyCohorts(organizationId: string) {
     organizationId,
   );
 
+  const channelRows = await prisma.$queryRawUnsafe<
+    { monthLabel: string; channelLabel: string; totalLeads: bigint; convertedCount: bigint }[]
+  >(
+    `
+    WITH month_tags AS (
+      SELECT id, name FROM "Tag"
+      WHERE "organizationId" = $1 AND name ~ '^(${monthNamesPattern})/\\d{4}$'
+    ),
+    contact_month AS (
+      SELECT DISTINCT ON (ct."contactId") ct."contactId", mt.name AS tag_name
+      FROM "ContactTag" ct JOIN month_tags mt ON mt.id = ct."tagId"
+    ),
+    origin_tags AS (
+      SELECT id, name FROM "Tag"
+      WHERE "organizationId" = $1 AND name = ANY($2::text[])
+    ),
+    contact_origin AS (
+      SELECT DISTINCT ON (ct."contactId") ct."contactId", ot.name AS origin_name
+      FROM "ContactTag" ct JOIN origin_tags ot ON ot.id = ct."tagId"
+    ),
+    converted AS (
+      SELECT DISTINCT d."contactId" FROM "Deal" d JOIN "DealPayment" dp ON dp."dealId" = d.id WHERE d."organizationId" = $1
+    )
+    SELECT
+      COALESCE(cm.tag_name, '${OLDER_BUCKET_LABEL}') AS "monthLabel",
+      COALESCE(co.origin_name, '${OTHER_ORIGIN_LABEL}') AS "channelLabel",
+      COUNT(*) AS "totalLeads",
+      COUNT(cv."contactId") AS "convertedCount"
+    FROM "Contact" c
+    LEFT JOIN contact_month cm ON cm."contactId" = c.id
+    LEFT JOIN contact_origin co ON co."contactId" = c.id
+    LEFT JOIN converted cv ON cv."contactId" = c.id
+    WHERE c."organizationId" = $1
+    GROUP BY "monthLabel", "channelLabel"
+    `,
+    organizationId,
+    ORIGIN_TAGS_PT,
+  );
+
+  const channelsByMonth = new Map<string, { name: string; totalLeads: number; convertedCount: number }[]>();
+  for (const r of channelRows) {
+    const list = channelsByMonth.get(r.monthLabel) ?? [];
+    list.push({ name: r.channelLabel, totalLeads: Number(r.totalLeads), convertedCount: Number(r.convertedCount) });
+    channelsByMonth.set(r.monthLabel, list);
+  }
+  for (const list of channelsByMonth.values()) {
+    list.sort((a, b) => b.totalLeads - a.totalLeads);
+  }
+
   const sorted = rows
-    .map((r) => ({ label: r.label, totalLeads: Number(r.totalLeads), convertedCount: Number(r.convertedCount) }))
+    .map((r) => ({
+      label: r.label,
+      totalLeads: Number(r.totalLeads),
+      convertedCount: Number(r.convertedCount),
+      channels: channelsByMonth.get(r.label) ?? [],
+    }))
     .sort((a, b) => {
       if (a.label === OLDER_BUCKET_LABEL) return -1;
       if (b.label === OLDER_BUCKET_LABEL) return 1;

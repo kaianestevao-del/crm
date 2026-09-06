@@ -11,10 +11,17 @@ interface RecentPayment {
   daysInStage: number | null;
 }
 
+interface CohortChannel {
+  name: string;
+  totalLeads: number;
+  convertedCount: number;
+}
+
 interface Cohort {
   label: string;
   totalLeads: number;
   convertedCount: number;
+  channels: CohortChannel[];
 }
 
 interface DashboardSummary {
@@ -53,6 +60,7 @@ function formatContacts(count: number | null): string {
 export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedCohort, setExpandedCohort] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -190,10 +198,25 @@ export function DashboardPage() {
             <div className="space-y-3 p-4">
               {data.cohorts.map((c) => {
                 const pct = c.totalLeads > 0 ? Math.round((c.convertedCount / c.totalLeads) * 100) : 0;
+                const isExpanded = expandedCohort === c.label;
+                const maxChannelLeads = Math.max(1, ...c.channels.map((ch) => ch.totalLeads));
                 return (
                   <div key={c.label}>
                     <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                      <span className="font-medium text-gray-700">{c.label}</span>
+                      <span className="flex items-center gap-1.5 font-medium text-gray-700">
+                        {c.label}
+                        {c.channels.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedCohort(isExpanded ? null : c.label)}
+                            className={`rounded p-0.5 hover:bg-gray-100 ${isExpanded ? "text-brand-dark" : "text-gray-400"}`}
+                            title="Ver origem dos leads"
+                            aria-label="Ver origem dos leads"
+                          >
+                            🔍
+                          </button>
+                        )}
+                      </span>
                       <span>
                         {c.convertedCount} de {c.totalLeads} leads · {pct}%
                       </span>
@@ -201,6 +224,27 @@ export function DashboardPage() {
                     <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
                       <div className="h-full rounded-full bg-brand-dark" style={{ width: `${pct}%` }} />
                     </div>
+                    {isExpanded && c.channels.length > 0 && (
+                      <div className="mt-2 space-y-1.5 rounded-md bg-gray-50 p-3">
+                        {c.channels.map((ch) => {
+                          const chPct = ch.totalLeads > 0 ? Math.round((ch.convertedCount / ch.totalLeads) * 100) : 0;
+                          const barWidth = Math.round((ch.totalLeads / maxChannelLeads) * 100);
+                          return (
+                            <div key={ch.name}>
+                              <div className="mb-0.5 flex items-center justify-between text-[11px] text-gray-500">
+                                <span>{ch.name}</span>
+                                <span>
+                                  {ch.convertedCount} de {ch.totalLeads} · {chPct}%
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                                <div className="h-full rounded-full bg-brand-dark/60" style={{ width: `${barWidth}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
