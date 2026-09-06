@@ -59,6 +59,7 @@ export function KanbanPage() {
   const [savingStage, setSavingStage] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
   const [confirmDeleteStageId, setConfirmDeleteStageId] = useState<string | null>(null);
+  const [confirmDeleteDealId, setConfirmDeleteDealId] = useState<string | null>(null);
 
   async function refresh() {
     const [pipelinesRes, contactsRes] = await Promise.all([api.get("/pipelines"), api.get("/contacts")]);
@@ -140,6 +141,12 @@ export function KanbanPage() {
           : "Não foi possível apagar esta etapa.";
       setStageError(message);
     }
+  }
+
+  async function handleDeleteDeal(dealId: string) {
+    setConfirmDeleteDealId(null);
+    await api.delete(`/pipelines/deals/${dealId}`);
+    await refresh();
   }
 
   if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando funil...</div>;
@@ -294,13 +301,42 @@ export function KanbanPage() {
                                 🔁 {deal.followUp.contacts.length} de {deal.followUp.target}
                               </p>
                             )}
-                            <button
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => navigate("/inbox", { state: { contactId: deal.contact.id } })}
-                              className="mt-2 text-xs font-medium text-brand-dark hover:underline"
-                            >
-                              💬 Ir para Caixa de Entrada
-                            </button>
+                            <div className="mt-2 flex items-center justify-between">
+                              <button
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={() => navigate("/inbox", { state: { contactId: deal.contact.id } })}
+                                className="text-xs font-medium text-brand-dark hover:underline"
+                              >
+                                💬 Ir para Caixa de Entrada
+                              </button>
+                              {confirmDeleteDealId === deal.id ? (
+                                <span className="flex items-center gap-1 text-xs">
+                                  <button
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onClick={() => handleDeleteDeal(deal.id)}
+                                    className="font-medium text-red-600 hover:underline"
+                                  >
+                                    Confirmar
+                                  </button>
+                                  <button
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onClick={() => setConfirmDeleteDealId(null)}
+                                    className="text-gray-400 hover:underline"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={() => setConfirmDeleteDealId(deal.id)}
+                                  title="Excluir cliente do funil"
+                                  className="text-xs font-medium text-red-600 hover:underline"
+                                >
+                                  🗑️ Excluir
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </Draggable>
