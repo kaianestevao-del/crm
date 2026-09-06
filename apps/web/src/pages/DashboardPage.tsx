@@ -46,9 +46,9 @@ function formatDays(days: number | null): string {
   return `${Math.round(days)} dias`;
 }
 
-function formatMessages(count: number | null): string {
+function formatContacts(count: number | null): string {
   if (count == null) return "—";
-  return `${Math.round(count)} msgs`;
+  return `${Math.round(count)} contatos`;
 }
 
 function formatMonth(iso: string): string {
@@ -97,11 +97,11 @@ export function DashboardPage() {
           <div className="flex gap-6">
             <div>
               <p className="text-xs text-gray-500">Média até converter</p>
-              <p className="text-xl font-semibold text-emerald-600">{formatMessages(data.followUpOutcomes.avgConverted)}</p>
+              <p className="text-xl font-semibold text-emerald-600">{formatContacts(data.followUpOutcomes.avgConverted)}</p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Média até desistir (Unfollow)</p>
-              <p className="text-xl font-semibold text-red-500">{formatMessages(data.followUpOutcomes.avgLost)}</p>
+              <p className="text-xl font-semibold text-red-500">{formatContacts(data.followUpOutcomes.avgLost)}</p>
             </div>
           </div>
         </div>

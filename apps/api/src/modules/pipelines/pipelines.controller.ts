@@ -29,35 +29,34 @@ async function transitionDealStage(tx: Tx, dealId: string, fromStageId: string, 
   await tx.dealStageHistory.create({ data: { dealId, stageId: toStageId, enteredAt: now } });
 }
 
-// Attaches `followUpProgress` (outbound messages sent since the deal's current stage began,
-// out of the org's configured target) to every deal currently sitting in a FOLLOW_UP-role
-// stage. Deals not in such a stage get `null`.
-async function attachFollowUpProgress(
+// Attaches `followUp` (the manual "contatos realizados" checklist for the deal's *current*,
+// still-open stay in a FOLLOW_UP-role stage) to every deal that's currently in such a stage.
+// Marks are entered by hand from the conversation — nothing here is inferred from message
+// traffic. Deals not in a FOLLOW_UP-role stage get `null`.
+async function attachFollowUpInfo(
   organizationId: string,
   deals: { id: string; stage?: { role: string | null } | null }[],
 ) {
   const followUpDealIds = deals.filter((d) => d.stage?.role === "FOLLOW_UP").map((d) => d.id);
-  const progress = new Map<string, { sent: number; target: number }>();
-  if (followUpDealIds.length === 0) return progress;
+  const info = new Map<string, { stageHistoryId: string; target: number; contacts: { index: number; completedAt: Date }[] }>();
+  if (followUpDealIds.length === 0) return info;
 
   const org = await prisma.organization.findUniqueOrThrow({
     where: { id: organizationId },
     select: { followUpMessageTarget: true },
   });
-  const rows = await prisma.$queryRaw<{ dealId: string; sent: bigint }[]>`
-    SELECT d.id AS "dealId", COUNT(m.id) AS sent
-    FROM "Deal" d
-    JOIN "DealStageHistory" dsh ON dsh."dealId" = d.id AND dsh."exitedAt" IS NULL
-    JOIN "Conversation" conv ON conv."contactId" = d."contactId" AND conv."organizationId" = d."organizationId"
-    LEFT JOIN "Message" m ON m."conversationId" = conv.id
-      AND m.direction = 'OUTBOUND' AND m."createdAt" >= dsh."enteredAt"
-    WHERE d.id = ANY(${followUpDealIds}::text[])
-    GROUP BY d.id
-  `;
-  for (const row of rows) {
-    progress.set(row.dealId, { sent: Number(row.sent), target: org.followUpMessageTarget });
+  const histories = await prisma.dealStageHistory.findMany({
+    where: { dealId: { in: followUpDealIds }, exitedAt: null },
+    select: {
+      id: true,
+      dealId: true,
+      followUpContacts: { select: { index: true, completedAt: true }, orderBy: { index: "asc" } },
+    },
+  });
+  for (const h of histories) {
+    info.set(h.dealId, { stageHistoryId: h.id, target: org.followUpMessageTarget, contacts: h.followUpContacts });
   }
-  return progress;
+  return info;
 }
 
 export async function listPipelines(req: Request, res: Response) {
@@ -84,15 +83,15 @@ export async function listPipelines(req: Request, res: Response) {
   });
 
   const allDeals = pipelines.flatMap((p) => p.stages.flatMap((s) => s.deals));
-  const progress = await attachFollowUpProgress(organizationId, allDeals);
-  const withProgress = pipelines.map((p) => ({
+  const followUpInfo = await attachFollowUpInfo(organizationId, allDeals);
+  const withFollowUp = pipelines.map((p) => ({
     ...p,
     stages: p.stages.map((s) => ({
       ...s,
-      deals: s.deals.map((d) => ({ ...d, followUpProgress: progress.get(d.id) ?? null })),
+      deals: s.deals.map((d) => ({ ...d, followUp: followUpInfo.get(d.id) ?? null })),
     })),
   }));
-  res.json(withProgress);
+  res.json(withFollowUp);
 }
 
 const createDealSchema = z.object({
@@ -179,8 +178,8 @@ export async function getContactDeal(req: Request, res: Response) {
     },
   });
   if (!deal) return res.json(deal);
-  const progress = await attachFollowUpProgress(organizationId, [deal]);
-  res.json({ ...deal, followUpProgress: progress.get(deal.id) ?? null });
+  const followUpInfo = await attachFollowUpInfo(organizationId, [deal]);
+  res.json({ ...deal, followUp: followUpInfo.get(deal.id) ?? null });
 }
 
 async function findOrCreateCurrentDeal(organizationId: string, contactId: string, stageId?: string) {
@@ -283,6 +282,52 @@ export async function updatePipelineStageRole(req: Request, res: Response) {
     data: { role: input.role },
   });
   res.json(updated);
+}
+
+// Both follow-up-checklist endpoints validate the stage-history period through its Deal's
+// organizationId, then return the fresh list of marks so the UI can reconcile in one round trip.
+async function loadStageHistoryForOrg(organizationId: string, stageHistoryId: string) {
+  const history = await prisma.dealStageHistory.findFirst({
+    where: { id: stageHistoryId, deal: { organizationId } },
+  });
+  if (!history) throw new HttpError(404, "stage_history_not_found");
+  return history;
+}
+
+export async function markFollowUpContact(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 1) throw new HttpError(400, "invalid_index");
+
+  const history = await loadStageHistoryForOrg(organizationId, req.params.stageHistoryId);
+  await prisma.dealFollowUpContact.upsert({
+    where: { dealStageHistoryId_index: { dealStageHistoryId: history.id, index } },
+    create: { dealStageHistoryId: history.id, index },
+    update: {},
+  });
+
+  const contacts = await prisma.dealFollowUpContact.findMany({
+    where: { dealStageHistoryId: history.id },
+    select: { index: true, completedAt: true },
+    orderBy: { index: "asc" },
+  });
+  res.status(201).json({ contacts });
+}
+
+export async function unmarkFollowUpContact(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 1) throw new HttpError(400, "invalid_index");
+
+  const history = await loadStageHistoryForOrg(organizationId, req.params.stageHistoryId);
+  await prisma.dealFollowUpContact.deleteMany({ where: { dealStageHistoryId: history.id, index } });
+
+  const contacts = await prisma.dealFollowUpContact.findMany({
+    where: { dealStageHistoryId: history.id },
+    select: { index: true, completedAt: true },
+    orderBy: { index: "asc" },
+  });
+  res.json({ contacts });
 }
 
 const addDealPaymentSchema = z.object({

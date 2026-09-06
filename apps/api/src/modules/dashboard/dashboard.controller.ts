@@ -147,17 +147,14 @@ async function getFollowUpOutcomes(organizationId: string) {
       LEFT JOIN "PipelineStage" next_ps ON next_ps.id = fp.next_stage_id
     ),
     counts AS (
-      SELECT c.id, c.outcome_role, COUNT(m.id) AS outbound_sent
+      SELECT c.id, c.outcome_role, COUNT(dfc.id) AS contacts_made
       FROM classified c
-      JOIN "Deal" d ON d.id = c."dealId"
-      JOIN "Conversation" conv ON conv."contactId" = d."contactId"
-      LEFT JOIN "Message" m ON m."conversationId" = conv.id AND m.direction = 'OUTBOUND'
-        AND m."createdAt" >= c."enteredAt" AND m."createdAt" < c."exitedAt"
+      LEFT JOIN "DealFollowUpContact" dfc ON dfc."dealStageHistoryId" = c.id
       GROUP BY c.id, c.outcome_role
     )
     SELECT
-      AVG(outbound_sent) FILTER (WHERE outcome_role = 'ACTIVE_PATIENT') AS avg_converted,
-      AVG(outbound_sent) FILTER (WHERE outcome_role = 'UNFOLLOW') AS avg_lost
+      AVG(contacts_made) FILTER (WHERE outcome_role = 'ACTIVE_PATIENT') AS avg_converted,
+      AVG(contacts_made) FILTER (WHERE outcome_role = 'UNFOLLOW') AS avg_lost
     FROM counts
   `;
   const row = rows[0];

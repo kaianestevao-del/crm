@@ -17,6 +17,11 @@ interface Payment {
   planType: PlanType | null;
 }
 
+interface FollowUp {
+  target: number;
+  contacts: { index: number }[];
+}
+
 interface Deal {
   id: string;
   title: string;
@@ -24,7 +29,7 @@ interface Deal {
   order: number;
   stageId: string;
   contact: Contact;
-  followUpProgress: { sent: number; target: number } | null;
+  followUp: FollowUp | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -186,9 +191,9 @@ export function KanbanPage() {
                                 <span className="text-gray-400"> · {deal.payments.length} lançamentos</span>
                               )}
                             </p>
-                            {deal.followUpProgress && (
+                            {deal.followUp && (
                               <p className="mt-0.5 text-xs text-gray-500">
-                                🔁 {deal.followUpProgress.sent} de {deal.followUpProgress.target}
+                                🔁 {deal.followUp.contacts.length} de {deal.followUp.target}
                               </p>
                             )}
                             <button

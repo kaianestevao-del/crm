@@ -483,8 +483,26 @@ model DealStageHistory {
   stageId String
   stage   PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
 
+  followUpContacts DealFollowUpContact[]
+
   @@index([dealId])
   @@index([stageId])
   @@index([dealId, exitedAt])
+}
+
+// One manually-checked "contact made" box in the follow-up checklist ("3 de 13"). The agent
+// marks these by hand from the conversation — nothing here is inferred from message traffic.
+// Scoped to a single DealStageHistory period, so re-entering the Follow-up stage later starts
+// a fresh checklist rather than carrying old marks over.
+model DealFollowUpContact {
+  id          String   @id @default(cuid())
+  index       Int
+  completedAt DateTime @default(now())
+
+  dealStageHistoryId String
+  dealStageHistory   DealStageHistory @relation(fields: [dealStageHistoryId], references: [id], onDelete: Cascade)
+
+  @@unique([dealStageHistoryId, index])
+  @@index([dealStageHistoryId])
 }
 

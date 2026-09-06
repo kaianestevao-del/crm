@@ -15,11 +15,22 @@ interface Payment {
   paidAt: string;
 }
 
+interface FollowUpContact {
+  index: number;
+  completedAt: string;
+}
+
+interface FollowUp {
+  stageHistoryId: string;
+  target: number;
+  contacts: FollowUpContact[];
+}
+
 interface Deal {
   id: string;
   stageId: string;
   payments: Payment[];
-  followUpProgress: { sent: number; target: number } | null;
+  followUp: FollowUp | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -33,6 +44,8 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   const [valueInput, setValueInput] = useState("");
   const [planTypeInput, setPlanTypeInput] = useState<PlanType | "">("");
   const [saving, setSaving] = useState(false);
+  const [showFollowUpPanel, setShowFollowUpPanel] = useState(false);
+  const [togglingIndex, setTogglingIndex] = useState<number | null>(null);
 
   async function refresh() {
     const [pipelinesRes, dealRes] = await Promise.all([api.get("/pipelines"), api.get(`/pipelines/contacts/${contactId}/deal`)]);
@@ -46,6 +59,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
     let cancelled = false;
     setLoaded(false);
     setShowPanel(false);
+    setShowFollowUpPanel(false);
     refresh()
       .catch(() => {})
       .finally(() => !cancelled && setLoaded(true));
@@ -89,6 +103,20 @@ export function ContactDeal({ contactId }: { contactId: string }) {
     await refresh();
   }
 
+  async function handleToggleFollowUpContact(stageHistoryId: string, index: number, isMarked: boolean) {
+    setTogglingIndex(index);
+    try {
+      if (isMarked) {
+        await api.delete(`/pipelines/stage-history/${stageHistoryId}/follow-up-contacts/${index}`);
+      } else {
+        await api.put(`/pipelines/stage-history/${stageHistoryId}/follow-up-contacts/${index}`);
+      }
+      await refresh();
+    } finally {
+      setTogglingIndex(null);
+    }
+  }
+
   if (!loaded || stages.length === 0) return null;
 
   const totalValue = deal?.payments.reduce((sum, p) => sum + p.value, 0) ?? 0;
@@ -113,19 +141,61 @@ export function ContactDeal({ contactId }: { contactId: string }) {
         ))}
       </select>
 
-      {deal?.followUpProgress && (
-        <span
-          title="Mensagens enviadas nesta etapa de follow-up"
-          className="rounded-full border border-dashed border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-500"
-        >
-          🔁 {deal.followUpProgress.sent} de {deal.followUpProgress.target}
-        </span>
+      {deal?.followUp && (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setShowPanel(false);
+              setShowFollowUpPanel((v) => !v);
+            }}
+            title="Contatos de follow-up realizados"
+            className={`rounded-full border px-2 py-0.5 text-xs focus:outline-none ${
+              deal.followUp.contacts.length > 0
+                ? "border-brand bg-brand/10 text-brand-dark"
+                : "border-dashed border-gray-300 bg-white text-gray-500"
+            }`}
+          >
+            🔁 {deal.followUp.contacts.length} de {deal.followUp.target}
+          </button>
+          {showFollowUpPanel && (
+            <div className="absolute left-0 top-full z-10 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+              <p className="mb-2 text-xs font-semibold text-gray-600">
+                Contatos realizados nesta etapa — clique para marcar/desmarcar
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: deal.followUp.target }, (_, i) => i + 1).map((index) => {
+                  const contact = deal.followUp!.contacts.find((c) => c.index === index);
+                  const isMarked = !!contact;
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      disabled={togglingIndex === index}
+                      onClick={() => handleToggleFollowUpContact(deal.followUp!.stageHistoryId, index, isMarked)}
+                      title={isMarked ? `Contato ${index} — feito em ${dateFormatter.format(new Date(contact!.completedAt))}` : `Marcar contato ${index}`}
+                      className={`flex h-6 w-6 items-center justify-center rounded text-xs font-medium disabled:opacity-50 ${
+                        isMarked ? "bg-brand-dark text-white" : "border border-gray-300 bg-white text-gray-400 hover:border-brand"
+                      }`}
+                    >
+                      {index}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       <div className="relative">
         <button
           type="button"
-          onClick={() => (showPanel ? setShowPanel(false) : openPanel())}
+          onClick={() => {
+            setShowFollowUpPanel(false);
+            if (showPanel) setShowPanel(false);
+            else openPanel();
+          }}
           title="Lançar valor"
           className={`rounded-full border px-2 py-0.5 text-xs focus:outline-none ${
             totalValue > 0 ? "border-brand bg-brand/10 text-brand-dark" : "border-dashed border-gray-300 bg-white text-gray-500"
