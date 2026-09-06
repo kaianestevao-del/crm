@@ -7,8 +7,8 @@ export function createSessionCommandsWorker() {
   return new Worker<SessionCommandJob>(
     QUEUE_SESSION_COMMANDS,
     async (job) => {
-      const { sessionId, command } = job.data;
-      if (command === "START") return startSession(sessionId);
+      const { sessionId, command, pairingPhoneNumber } = job.data;
+      if (command === "START") return startSession(sessionId, pairingPhoneNumber);
       if (command === "RESTART") return restartSession(sessionId);
       if (command === "LOGOUT") return logoutSession(sessionId);
       if (command === "RESYNC_LABELS") return resyncLabels(sessionId);

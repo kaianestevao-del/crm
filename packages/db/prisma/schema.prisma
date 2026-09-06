@@ -121,8 +121,16 @@ model WhatsappSession {
   phoneNumber String?
   status      SessionStatus @default(PENDING)
   qrCode      String?
+  // 8-character code for WhatsApp's "link with phone number" pairing flow — an alternative to
+  // scanning the QR code, meant for a team member connecting a number remotely.
+  pairingCode String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+
+  // Soft-delete: "removing" a connection (e.g. an employee's number leaving the team) must
+  // never cascade-delete the Conversations/Messages that already went through it — that history
+  // stays forever. Deleting just logs the session out and hides it from the active list.
+  archivedAt DateTime?
 
   organizationId String
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)

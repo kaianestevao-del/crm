@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { requireAuth } from "../../middleware/auth";
-import { listSessions, createSession, getSession, restartSession, logoutSession, resyncLabels } from "./whatsapp-sessions.controller";
+import { listSessions, createSession, getSession, restartSession, logoutSession, resyncLabels, deleteSession } from "./whatsapp-sessions.controller";
 
 export const whatsappSessionsRouter = Router();
 whatsappSessionsRouter.use(requireAuth);
@@ -12,3 +12,4 @@ whatsappSessionsRouter.get("/:id", asyncHandler(getSession));
 whatsappSessionsRouter.post("/:id/restart", asyncHandler(restartSession));
 whatsappSessionsRouter.post("/:id/logout", asyncHandler(logoutSession));
 whatsappSessionsRouter.post("/:id/resync-labels", asyncHandler(resyncLabels));
+whatsappSessionsRouter.delete("/:id", asyncHandler(deleteSession));

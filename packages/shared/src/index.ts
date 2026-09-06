@@ -44,6 +44,7 @@ export const REALTIME_CHANNEL = "crm:realtime";
 // but nominally distinct type from the enum declared in this file.
 export type RealtimeEvent =
   | { type: "session.qr"; organizationId: string; sessionId: string; qr: string }
+  | { type: "session.pairingCode"; organizationId: string; sessionId: string; pairingCode: string }
   | { type: "session.status"; organizationId: string; sessionId: string; status: string; phoneNumber?: string | null }
   | { type: "message.new"; organizationId: string; conversationId: string; message: unknown }
   | { type: "message.updated"; organizationId: string; conversationId: string; message: unknown }
@@ -84,6 +85,10 @@ export type SessionCommand = "START" | "LOGOUT" | "RESTART" | "RESYNC_LABELS";
 export interface SessionCommandJob {
   sessionId: string;
   command: SessionCommand;
+  // START only: request a pairing code for this phone number instead of a scannable QR code —
+  // for a team member linking a number remotely, the way WhatsApp Web's own "link with phone
+  // number" flow works.
+  pairingPhoneNumber?: string;
 }
 
 // Mirrors WhatsApp's own native Business labels via Baileys (addChatLabel/removeChatLabel/

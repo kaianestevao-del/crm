@@ -9,10 +9,11 @@ interface WhatsappSession {
   phoneNumber: string | null;
   status: SessionStatus;
   qrCode: string | null;
+  pairingCode: string | null;
 }
 
 const statusLabel: Record<SessionStatus, string> = {
-  [SessionStatus.PENDING]: "Aguardando leitura do QR Code",
+  [SessionStatus.PENDING]: "Aguardando conexão",
   [SessionStatus.CONNECTED]: "Conectado",
   [SessionStatus.DISCONNECTED]: "Desconectado (tentando reconectar)",
   [SessionStatus.LOGGED_OUT]: "Desconectado (faça login novamente)",
@@ -24,6 +25,10 @@ const statusColor: Record<SessionStatus, string> = {
   [SessionStatus.DISCONNECTED]: "bg-orange-100 text-orange-800",
   [SessionStatus.LOGGED_OUT]: "bg-red-100 text-red-800",
 };
+
+function formatPairingCode(code: string) {
+  return code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
 
 function WaLinkGenerator({ phoneNumber }: { phoneNumber: string }) {
   const [message, setMessage] = useState("");
@@ -69,8 +74,11 @@ function WaLinkGenerator({ phoneNumber }: { phoneNumber: string }) {
 export function ConnectWhatsappPage() {
   const [sessions, setSessions] = useState<WhatsappSession[]>([]);
   const [newName, setNewName] = useState("");
+  const [connectMethod, setConnectMethod] = useState<"qr" | "code">("qr");
+  const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
   const [creating, setCreating] = useState(false);
   const [linkGeneratorFor, setLinkGeneratorFor] = useState<string | null>(null);
+  const [confirmDeleteFor, setConfirmDeleteFor] = useState<string | null>(null);
 
   async function refresh() {
     const res = await api.get("/whatsapp-sessions");
@@ -83,22 +91,39 @@ export function ConnectWhatsappPage() {
     if (!socket) return;
 
     const onQr = (evt: { sessionId: string; qr: string }) => {
-      setSessions((prev) => prev.map((s) => (s.id === evt.sessionId ? { ...s, qrCode: evt.qr, status: SessionStatus.PENDING } : s)));
+      setSessions((prev) =>
+        prev.map((s) => (s.id === evt.sessionId ? { ...s, qrCode: evt.qr, pairingCode: null, status: SessionStatus.PENDING } : s)),
+      );
+    };
+    const onPairingCode = (evt: { sessionId: string; pairingCode: string }) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === evt.sessionId ? { ...s, pairingCode: evt.pairingCode, qrCode: null, status: SessionStatus.PENDING } : s,
+        ),
+      );
     };
     const onStatus = (evt: { sessionId: string; status: SessionStatus; phoneNumber?: string | null }) => {
       setSessions((prev) =>
         prev.map((s) =>
           s.id === evt.sessionId
-            ? { ...s, status: evt.status, phoneNumber: evt.phoneNumber ?? s.phoneNumber, qrCode: evt.status === SessionStatus.CONNECTED ? null : s.qrCode }
+            ? {
+                ...s,
+                status: evt.status,
+                phoneNumber: evt.phoneNumber ?? s.phoneNumber,
+                qrCode: evt.status === SessionStatus.CONNECTED ? null : s.qrCode,
+                pairingCode: evt.status === SessionStatus.CONNECTED ? null : s.pairingCode,
+              }
             : s,
         ),
       );
     };
 
     socket.on("session.qr", onQr);
+    socket.on("session.pairingCode", onPairingCode);
     socket.on("session.status", onStatus);
     return () => {
       socket.off("session.qr", onQr);
+      socket.off("session.pairingCode", onPairingCode);
       socket.off("session.status", onStatus);
     };
   }, []);
@@ -106,10 +131,15 @@ export function ConnectWhatsappPage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
+    if (connectMethod === "code" && !pairingPhoneNumber.trim()) return;
     setCreating(true);
     try {
-      await api.post("/whatsapp-sessions", { name: newName.trim() });
+      await api.post("/whatsapp-sessions", {
+        name: newName.trim(),
+        pairingPhoneNumber: connectMethod === "code" ? pairingPhoneNumber.trim() : undefined,
+      });
       setNewName("");
+      setPairingPhoneNumber("");
       await refresh();
     } finally {
       setCreating(false);
@@ -128,6 +158,12 @@ export function ConnectWhatsappPage() {
     await api.post(`/whatsapp-sessions/${id}/resync-labels`);
   }
 
+  async function handleDelete(id: string) {
+    await api.delete(`/whatsapp-sessions/${id}`);
+    setConfirmDeleteFor(null);
+    await refresh();
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="mb-1 text-lg font-semibold">Conexão com o WhatsApp</h1>
@@ -135,16 +171,37 @@ export function ConnectWhatsappPage() {
         Conecte um número de WhatsApp escaneando o QR Code, como no WhatsApp Web. Um único número pode ser usado por múltiplos atendentes.
       </p>
 
-      <form onSubmit={handleCreate} className="mb-6 flex gap-2">
+      <form onSubmit={handleCreate} className="mb-6 max-w-xl rounded-lg border border-gray-200 bg-white p-4">
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Nome do número (ex: Comercial, Suporte)"
-          className="w-72 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
         />
+
+        <div className="mb-3 flex gap-4 text-sm">
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={connectMethod === "qr"} onChange={() => setConnectMethod("qr")} />
+            QR Code
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={connectMethod === "code"} onChange={() => setConnectMethod("code")} />
+            Código de pareamento (para conectar por número, à distância)
+          </label>
+        </div>
+
+        {connectMethod === "code" && (
+          <input
+            value={pairingPhoneNumber}
+            onChange={(e) => setPairingPhoneNumber(e.target.value)}
+            placeholder="Número do funcionário com DDI e DDD (ex: 5511999998888)"
+            className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          />
+        )}
+
         <button
           type="submit"
-          disabled={creating || !newName.trim()}
+          disabled={creating || !newName.trim() || (connectMethod === "code" && !pairingPhoneNumber.trim())}
           className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           Conectar novo número
@@ -164,7 +221,18 @@ export function ConnectWhatsappPage() {
             {session.status === SessionStatus.PENDING && session.qrCode && (
               <img src={session.qrCode} alt="QR Code" className="mx-auto h-48 w-48" />
             )}
-            <div className="mt-3 flex gap-2">
+            {session.status === SessionStatus.PENDING && session.pairingCode && (
+              <div className="rounded-md bg-gray-50 py-6 text-center">
+                <p className="mb-1 text-xs text-gray-500">Digite este código no WhatsApp do funcionário</p>
+                <p className="mb-1 text-xs text-gray-400">
+                  Aparelhos conectados → Conectar um aparelho → Conectar com número de telefone
+                </p>
+                <p className="font-mono text-2xl font-semibold tracking-widest text-brand-dark">
+                  {formatPairingCode(session.pairingCode)}
+                </p>
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
               <button onClick={() => handleRestart(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
                 Reiniciar
               </button>
@@ -182,6 +250,21 @@ export function ConnectWhatsappPage() {
               {session.status === SessionStatus.CONNECTED && (
                 <button onClick={() => handleResyncLabels(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
                   🔄 Ressincronizar etiquetas
+                </button>
+              )}
+              {confirmDeleteFor === session.id ? (
+                <span className="flex w-full flex-wrap items-center gap-2 text-xs">
+                  <span className="text-gray-500">Apagar esta conexão? As conversas já registradas continuam salvas.</span>
+                  <button onClick={() => handleDelete(session.id)} className="font-medium text-red-600 hover:underline">
+                    Confirmar
+                  </button>
+                  <button onClick={() => setConfirmDeleteFor(null)} className="text-gray-400 hover:underline">
+                    Cancelar
+                  </button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmDeleteFor(session.id)} className="text-xs font-medium text-red-600 hover:underline">
+                  🗑️ Apagar
                 </button>
               )}
             </div>

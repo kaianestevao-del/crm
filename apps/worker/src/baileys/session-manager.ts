@@ -34,7 +34,7 @@ function normalizeJid(jid: string) {
   return jid.split(":")[0] + "@" + jid.split("@")[1];
 }
 
-export async function startSession(sessionId: string): Promise<void> {
+export async function startSession(sessionId: string, pairingPhoneNumber?: string): Promise<void> {
   if (activeSockets.has(sessionId)) return;
 
   const session = await prisma.whatsappSession.findUnique({ where: { id: sessionId } });
@@ -61,6 +61,10 @@ export async function startSession(sessionId: string): Promise<void> {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // Baileys' own guidance: request the pairing code only after the first QR event fires (not
+  // immediately after creating the socket), and only once per connection attempt.
+  let pairingCodeRequested = false;
+
   sock.ev.on("connection.update", async (update) => {
     // A single failed DB write here (e.g. the session row was deleted while this socket was
     // still live) must never crash the whole worker process — that would drop every other
@@ -69,11 +73,28 @@ export async function startSession(sessionId: string): Promise<void> {
     try {
       const { connection, lastDisconnect, qr } = update;
 
-      if (qr) {
+      if (qr && pairingPhoneNumber && !pairingCodeRequested && !state.creds.registered) {
+        pairingCodeRequested = true;
+        try {
+          const pairingCode = await sock.requestPairingCode(pairingPhoneNumber);
+          await prisma.whatsappSession.update({
+            where: { id: sessionId },
+            data: { status: SessionStatus.PENDING, pairingCode, qrCode: null },
+          });
+          publishRealtimeEvent({
+            type: "session.pairingCode",
+            organizationId: session.organizationId,
+            sessionId,
+            pairingCode,
+          });
+        } catch (err) {
+          console.error(`pairing_code_request_failed:${sessionId}`, err);
+        }
+      } else if (qr && !pairingPhoneNumber) {
         const qrDataUrl = await qrcode.toDataURL(qr);
         await prisma.whatsappSession.update({
           where: { id: sessionId },
-          data: { status: SessionStatus.PENDING, qrCode: qrDataUrl },
+          data: { status: SessionStatus.PENDING, qrCode: qrDataUrl, pairingCode: null },
         });
         publishRealtimeEvent({
           type: "session.qr",
@@ -87,7 +108,7 @@ export async function startSession(sessionId: string): Promise<void> {
         const phoneNumber = sock.user?.id ? normalizeJid(sock.user.id).split("@")[0] : null;
         await prisma.whatsappSession.update({
           where: { id: sessionId },
-          data: { status: SessionStatus.CONNECTED, qrCode: null, phoneNumber },
+          data: { status: SessionStatus.CONNECTED, qrCode: null, pairingCode: null, phoneNumber },
         });
         publishRealtimeEvent({
           type: "session.status",
@@ -105,7 +126,7 @@ export async function startSession(sessionId: string): Promise<void> {
 
         await prisma.whatsappSession.update({
           where: { id: sessionId },
-          data: { status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED, qrCode: null },
+          data: { status: loggedOut ? SessionStatus.LOGGED_OUT : SessionStatus.DISCONNECTED, qrCode: null, pairingCode: null },
         });
         publishRealtimeEvent({
           type: "session.status",
@@ -568,7 +589,7 @@ export function isSessionActive(sessionId: string) {
 
 export async function startAllPersistedSessions() {
   const sessions = await prisma.whatsappSession.findMany({
-    where: { status: { not: SessionStatus.LOGGED_OUT } },
+    where: { status: { not: SessionStatus.LOGGED_OUT }, archivedAt: null },
   });
   for (const session of sessions) {
     await startSession(session.id).catch((err) => console.error(`start_session_failed:${session.id}`, err));
