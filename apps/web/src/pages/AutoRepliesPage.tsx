@@ -52,13 +52,13 @@ function KeywordEditor({ keywords, onChange }: { keywords: string[]; onChange: (
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Digite uma palavra-chave e pressione Enter"
-          className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
         />
         <button
           type="button"
           onClick={addKeyword}
           disabled={!input.trim()}
-          className="rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+          className="rounded-xl bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50"
         >
           + Adicionar
         </button>
@@ -116,7 +116,7 @@ function AutoTagRuleForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+    <form onSubmit={handleSubmit} className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-600">Nome do autoatendimento</label>
         <input
@@ -124,7 +124,7 @@ function AutoTagRuleForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Ex: Social Seller"
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
         />
       </div>
 
@@ -155,12 +155,12 @@ function AutoTagRuleForm({
             value={newTagName}
             onChange={(e) => setNewTagName(e.target.value)}
             placeholder="Criar nova aba (ex: Origem - Instagram - Set/26)"
-            className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+            className="min-w-0 flex-1 rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
           />
           <button
             type="button"
             onClick={handleCreateTag}
-            className="rounded-md bg-gray-100 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200"
+            className="rounded-xl bg-gray-100 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200"
           >
             + Criar aba
           </button>
@@ -168,13 +168,13 @@ function AutoTagRuleForm({
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button type="button" onClick={onCancel} className="rounded-md px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">
+        <button type="button" onClick={onCancel} className="rounded-xl px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">
           Cancelar
         </button>
         <button
           type="submit"
           disabled={submitting || !name.trim() || keywords.length === 0 || tagIds.size === 0}
-          className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-xl bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {submitLabel}
         </button>
@@ -241,15 +241,15 @@ export function AutoRepliesPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="mb-1 text-lg font-semibold">Autoatendimento</h1>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <h1 className="mb-1 text-lg font-semibold text-gray-900">Autoatendimento</h1>
       <p className="mb-6 max-w-2xl text-sm text-gray-500">
         Cada autoatendimento tem um nome, um acionamento (palavras-chave) e uma ação: marcar o contato com uma ou mais
         Abas. Por exemplo, um autoatendimento "Social Seller" acionado pelas palavras do link da bio, marcando o
         contato com a origem e o mês em que chegou. Nada é enviado ao contato.
       </p>
 
-      <div className="mb-6 flex max-w-2xl items-center justify-between rounded-lg border border-gray-200 bg-white p-4">
+      <div className="mb-6 flex max-w-2xl items-center justify-between rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div>
           <p className="text-sm font-medium">Ativar autoatendimento</p>
           <p className="text-xs text-gray-500">Liga ou desliga todos os autoatendimentos abaixo, de uma vez.</p>
@@ -274,7 +274,7 @@ export function AutoRepliesPage() {
               setEditingId(null);
               setShowCreateForm((v) => !v);
             }}
-            className="rounded-md bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+            className="rounded-xl bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
           >
             + Novo autoatendimento
           </button>
@@ -293,7 +293,7 @@ export function AutoRepliesPage() {
                 submitLabel="Salvar alterações"
               />
             ) : (
-              <div key={rule.id} className="rounded-lg border border-gray-200 bg-white p-4">
+              <div key={rule.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-sm font-semibold">{rule.name}</p>
                   <button onClick={() => handleToggleRuleActive(rule)} className={`text-xs ${rule.isActive ? "text-brand-dark" : "text-gray-400"}`}>
@@ -334,7 +334,7 @@ export function AutoRepliesPage() {
             ),
           )}
           {rules.length === 0 && !showCreateForm && (
-            <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400">
+            <p className="rounded-2xl border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400">
               Nenhum autoatendimento cadastrado ainda.
             </p>
           )}

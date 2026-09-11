@@ -1,7 +1,7 @@
 interface AvatarContact {
   name: string | null;
   phoneNumber: string;
-  avatarUrl: string | null;
+  avatarUrl?: string | null;
 }
 
 export function contactLabel(contact: AvatarContact) {

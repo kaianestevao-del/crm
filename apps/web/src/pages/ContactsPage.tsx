@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
 import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
+import { Icon } from "../components/Icon";
 
 interface Tag {
   id: string;
@@ -104,27 +105,62 @@ export function ContactsPage() {
 
   if (loading) return <div className="p-6 text-sm text-gray-500">Carregando contatos...</div>;
 
+  const withConversation = contacts.filter((c) => c.hasConversation).length;
+
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Contatos</h1>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Contatos</h1>
+          <p className="text-sm text-gray-500">Base de contatos e conversas do WhatsApp.</p>
+        </div>
         <button
           onClick={() => setShowExport((v) => !v)}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
         >
-          ⬇️ Baixar contatos
+          <Icon name="download" className="h-3.5 w-3.5" />
+          Baixar contatos
         </button>
       </div>
-      <p className="mb-4 text-sm text-gray-500">{contacts.length} contatos no total.</p>
+
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <p className="text-xs font-medium text-gray-500">Total de contatos</p>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand-dark">
+              <Icon name="users" />
+            </span>
+          </div>
+          <p className="mt-3 text-2xl font-semibold text-gray-900">{contacts.length}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <p className="text-xs font-medium text-gray-500">Com conversa iniciada</p>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+              <Icon name="chat" />
+            </span>
+          </div>
+          <p className="mt-3 text-2xl font-semibold text-gray-900">{withConversation}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <p className="text-xs font-medium text-gray-500">Abas cadastradas</p>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+              <Icon name="tag" />
+            </span>
+          </div>
+          <p className="mt-3 text-2xl font-semibold text-gray-900">{allTags.length}</p>
+        </div>
+      </div>
 
       {showExport && (
-        <div className="mb-4 max-w-xl rounded-lg border border-gray-200 bg-white p-4">
+        <div className="mb-4 max-w-xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm font-medium">Baixar contatos (Excel)</p>
+            <p className="text-sm font-medium text-gray-900">Baixar contatos (Excel)</p>
             <button
               onClick={exportAll}
               disabled={exporting}
-              className="rounded-md bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="rounded-xl bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               Baixar tudo
             </button>
@@ -147,50 +183,64 @@ export function ContactsPage() {
           <button
             onClick={exportSelected}
             disabled={exporting || exportTagIds.size === 0}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
           >
             Baixar selecionados ({exportTagIds.size})
           </button>
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nome ou telefone..."
-          className="w-64 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-        />
-        <select
-          value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou telefone..."
+            className="w-64 rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-brand focus:outline-none"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setTagFilter("")}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+            tagFilter === "" ? "bg-brand text-white shadow-sm" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+          }`}
         >
-          <option value="">Todas as abas</option>
-          {allTags.map((tag) => (
-            <option key={tag.id} value={tag.id}>
-              {tag.name}
-            </option>
-          ))}
-        </select>
+          Todas as abas
+        </button>
+        {allTags.map((tag) => (
+          <button
+            key={tag.id}
+            type="button"
+            onClick={() => setTagFilter(tag.id)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+              tagFilter === tag.id
+                ? "bg-brand text-white shadow-sm"
+                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            {tag.name}
+          </button>
+        ))}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400">
-              <th className="px-4 py-2 font-medium">Contato</th>
-              <th className="px-4 py-2 font-medium">Telefone</th>
-              <th className="px-4 py-2 font-medium">Abas</th>
-              <th className="px-4 py-2 font-medium"></th>
+              <th className="px-5 py-3 font-medium">Contato</th>
+              <th className="px-5 py-3 font-medium">Telefone</th>
+              <th className="px-5 py-3 font-medium">Abas</th>
+              <th className="px-5 py-3 font-medium"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((contact) => (
-              <tr key={contact.id} className="border-t border-gray-100">
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <ContactAvatar contact={contact} size={28} />
+              <tr key={contact.id} className="border-t border-gray-100 hover:bg-gray-50/60">
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <ContactAvatar contact={contact} size={32} />
                     {editingId === contact.id ? (
                       <>
                         <input
@@ -201,7 +251,7 @@ export function ContactsPage() {
                             if (e.key === "Enter") saveName(contact.id);
                             if (e.key === "Escape") setEditingId(null);
                           }}
-                          className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                          className="w-40 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
                         />
                         <button
                           onClick={() => saveName(contact.id)}
@@ -216,20 +266,20 @@ export function ContactsPage() {
                       </>
                     ) : (
                       <>
-                        <span className="font-medium">{contactLabel(contact)}</span>
+                        <span className="font-medium text-gray-800">{contactLabel(contact)}</span>
                         <button
                           onClick={() => startEditing(contact)}
                           title="Editar nome"
                           className="text-gray-300 hover:text-brand-dark"
                         >
-                          ✏️
+                          <Icon name="edit" className="h-3.5 w-3.5" />
                         </button>
                       </>
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-2 text-gray-600">+{contact.phoneNumber}</td>
-                <td className="px-4 py-2">
+                <td className="px-5 py-3 text-gray-600">+{contact.phoneNumber}</td>
+                <td className="px-5 py-3">
                   <div className="flex flex-wrap gap-1">
                     {contact.tags.map((tag) => (
                       <span key={tag.id} className="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand-dark">
@@ -238,14 +288,15 @@ export function ContactsPage() {
                     ))}
                   </div>
                 </td>
-                <td className="px-4 py-2 text-right">
+                <td className="px-5 py-3 text-right">
                   <button
                     disabled={!contact.hasConversation}
                     onClick={() => navigate("/inbox", { state: { contactId: contact.id } })}
                     title={contact.hasConversation ? "Ir para a conversa" : "Este contato ainda não trocou mensagens"}
-                    className="text-xs font-medium text-brand-dark hover:underline disabled:cursor-not-allowed disabled:text-gray-300 disabled:no-underline"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline disabled:cursor-not-allowed disabled:text-gray-300 disabled:no-underline"
                   >
-                    💬 Ir para Caixa de Entrada
+                    <Icon name="chat" className="h-3.5 w-3.5" />
+                    Ir para Caixa de Entrada
                   </button>
                 </td>
               </tr>

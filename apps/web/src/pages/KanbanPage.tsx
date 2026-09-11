@@ -4,6 +4,8 @@ import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea
 import { PlanType, PLAN_TYPE_LABELS } from "@crm/shared";
 import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
+import { Icon } from "../components/Icon";
+import { ContactAvatar } from "../components/ContactAvatar";
 
 interface Contact {
   id: string;
@@ -152,44 +154,50 @@ export function KanbanPage() {
   if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando funil...</div>;
 
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex h-full flex-col bg-gray-50 p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">{pipeline.name}</h1>
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">{pipeline.name}</h1>
+          <p className="text-sm text-gray-500">Acompanhe e gerencie seu funil de vendas.</p>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => downloadFile("/pipelines/deals/export", "negocios.xlsx")}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 shadow-sm hover:bg-gray-50"
           >
-            ⬇️ Exportar negócios
+            <Icon name="download" className="h-4 w-4" />
+            Exportar negócios
           </button>
           <button
             onClick={() => setShowStageForm((v) => !v)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 shadow-sm hover:bg-gray-50"
           >
-            + Nova etapa
+            <Icon name="plus" className="h-4 w-4" />
+            Nova etapa
           </button>
           <button
             onClick={() => setShowForm((v) => !v)}
-            className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+            className="flex items-center gap-1.5 rounded-xl bg-brand-dark px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
           >
-            + Novo lead
+            <Icon name="plus" className="h-4 w-4" />
+            Novo lead
           </button>
         </div>
       </div>
 
       {showStageForm && (
-        <form onSubmit={handleCreateStage} className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-white p-3">
+        <form onSubmit={handleCreateStage} className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
           <input
             autoFocus
             value={newStageName}
             onChange={(e) => setNewStageName(e.target.value)}
             placeholder="Nome da nova etapa"
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
           />
           <button
             type="submit"
             disabled={savingStage || !newStageName.trim()}
-            className="rounded-md bg-brand-dark px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="rounded-xl bg-brand-dark px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             Adicionar
           </button>
@@ -197,7 +205,7 @@ export function KanbanPage() {
       )}
 
       {stageError && (
-        <div className="mb-4 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="mb-4 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {stageError}
           <button onClick={() => setStageError(null)} className="text-red-400 hover:underline">
             ✕
@@ -206,12 +214,12 @@ export function KanbanPage() {
       )}
 
       {showForm && (
-        <form onSubmit={handleCreateDeal} className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-white p-3">
+        <form onSubmit={handleCreateDeal} className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
           <select
             value={contactId}
             onChange={(e) => setContactId(e.target.value)}
             required
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
           >
             <option value="">Selecione um contato</option>
             {contacts.map((c) => (
@@ -225,9 +233,9 @@ export function KanbanPage() {
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Título do lead"
             required
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
           />
-          <button type="submit" className="rounded-md bg-brand-dark px-3 py-2 text-sm font-medium text-white hover:opacity-90">
+          <button type="submit" className="rounded-xl bg-brand-dark px-3 py-2 text-sm font-medium text-white hover:opacity-90">
             Adicionar
           </button>
         </form>
@@ -235,18 +243,31 @@ export function KanbanPage() {
 
       <DragDropContext onDragEnd={handleDragEnd}>
         <div className="flex flex-1 gap-4 overflow-x-auto">
-          {pipeline.stages.map((stage) => (
+          {pipeline.stages.map((stage) => {
+            const stageTotal = stage.deals.reduce(
+              (sum, d) => sum + d.payments.reduce((s, p) => s + p.value, 0),
+              0,
+            );
+            return (
             <Droppable droppableId={stage.id} key={stage.id}>
               {(provided) => (
                 <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
-                  className="flex w-72 flex-shrink-0 flex-col rounded-lg bg-gray-100 p-3"
+                  className="flex w-72 flex-shrink-0 flex-col rounded-2xl border border-gray-200 bg-white/60 p-3 shadow-sm"
                 >
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-gray-700">
-                      {stage.name} <span className="text-gray-400">({stage.deals.length})</span>
-                    </p>
+                  <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-2">
+                    <div>
+                      <p className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+                        {stage.name}
+                        <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500">
+                          {stage.deals.length}
+                        </span>
+                      </p>
+                      {stageTotal > 0 && (
+                        <p className="text-xs text-gray-400">{currencyFormatter.format(stageTotal)}</p>
+                      )}
+                    </div>
                     {confirmDeleteStageId === stage.id ? (
                       <span className="flex items-center gap-1 text-xs">
                         <button onClick={() => handleDeleteStage(stage.id)} className="font-medium text-red-600 hover:underline">
@@ -260,7 +281,7 @@ export function KanbanPage() {
                       <button
                         onClick={() => setConfirmDeleteStageId(stage.id)}
                         title="Remover etapa"
-                        className="rounded px-1 text-gray-400 hover:bg-gray-200 hover:text-red-600"
+                        className="rounded-lg px-1.5 py-0.5 text-gray-400 hover:bg-gray-100 hover:text-red-600"
                       >
                         −
                       </button>
@@ -277,11 +298,18 @@ export function KanbanPage() {
                             ref={dragProvided.innerRef}
                             {...dragProvided.draggableProps}
                             {...dragProvided.dragHandleProps}
-                            className="rounded-md border border-gray-200 bg-white p-3 shadow-sm"
+                            className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
                           >
-                            <p className="text-sm font-medium">{deal.contact.name?.trim() || `+${deal.contact.phoneNumber}`}</p>
-                            <p className="text-xs text-gray-500">+{deal.contact.phoneNumber}</p>
-                            <p className="mt-1 text-xs font-medium text-brand-dark">
+                            <div className="flex items-center gap-2">
+                              <ContactAvatar contact={deal.contact} size={26} />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-gray-800">
+                                  {deal.contact.name?.trim() || `+${deal.contact.phoneNumber}`}
+                                </p>
+                                <p className="truncate text-xs text-gray-500">+{deal.contact.phoneNumber}</p>
+                              </div>
+                            </div>
+                            <p className="mt-1.5 text-xs font-medium text-brand-dark">
                               {currencyFormatter.format(totalValue)}
                               {deal.payments.length > 1 && (
                                 <span className="text-gray-400"> · {deal.payments.length} lançamentos</span>
@@ -297,17 +325,18 @@ export function KanbanPage() {
                               </div>
                             )}
                             {deal.followUp && (
-                              <p className="mt-0.5 text-xs text-gray-500">
-                                🔁 {deal.followUp.contacts.length} de {deal.followUp.target}
+                              <p className="mt-1 text-xs text-blue-600">
+                                {deal.followUp.contacts.length} de {deal.followUp.target} follow-ups
                               </p>
                             )}
-                            <div className="mt-2 flex items-center justify-between">
+                            <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2">
                               <button
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onClick={() => navigate("/inbox", { state: { contactId: deal.contact.id } })}
-                                className="text-xs font-medium text-brand-dark hover:underline"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-dark hover:underline"
                               >
-                                💬 Ir para Caixa de Entrada
+                                <Icon name="chat" className="h-3.5 w-3.5" />
+                                Caixa de Entrada
                               </button>
                               {confirmDeleteDealId === deal.id ? (
                                 <span className="flex items-center gap-1 text-xs">
@@ -333,7 +362,7 @@ export function KanbanPage() {
                                   title="Excluir cliente do funil"
                                   className="text-xs font-medium text-red-600 hover:underline"
                                 >
-                                  🗑️ Excluir
+                                  Excluir
                                 </button>
                               )}
                             </div>
@@ -347,7 +376,8 @@ export function KanbanPage() {
                 </div>
               )}
             </Droppable>
-          ))}
+            );
+          })}
         </div>
       </DragDropContext>
     </div>

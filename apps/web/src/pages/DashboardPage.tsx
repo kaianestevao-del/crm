@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { Icon, IconName } from "../components/Icon";
 
 interface RecentPayment {
   id: string;
@@ -57,6 +58,62 @@ function formatContacts(count: number | null): string {
   return `${Math.round(count)} contatos`;
 }
 
+const tones = {
+  emerald: { badge: "bg-emerald-50 text-emerald-600", value: "text-emerald-600" },
+  red: { badge: "bg-red-50 text-red-500", value: "text-red-500" },
+  brand: { badge: "bg-brand/10 text-brand-dark", value: "text-brand-dark" },
+  blue: { badge: "bg-blue-50 text-blue-600", value: "text-gray-900" },
+  amber: { badge: "bg-amber-50 text-amber-600", value: "text-gray-900" },
+  violet: { badge: "bg-violet-50 text-violet-600", value: "text-gray-900" },
+} as const;
+
+function KpiCard({
+  label,
+  value,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  icon: IconName;
+  tone: keyof typeof tones;
+}) {
+  const t = tones[tone];
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between">
+        <p className="text-xs font-medium text-gray-500">{label}</p>
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${t.badge}`}>
+          <Icon name={icon} />
+        </span>
+      </div>
+      <p className={`mt-3 text-2xl font-semibold ${t.value}`}>{value}</p>
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  children,
+  noPadding,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  noPadding?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="border-b border-gray-100 px-5 py-4">
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+      </div>
+      <div className={noPadding ? "" : "p-5"}>{children}</div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,72 +129,90 @@ export function DashboardPage() {
   if (loading) return <div className="p-6 text-sm text-gray-500">Carregando dashboard...</div>;
   if (!data) return <div className="p-6 text-sm text-gray-500">Não foi possível carregar o dashboard.</div>;
 
-  const kpis = [
-    { label: "Pacientes Ativos", value: String(data.patients.active), tone: "text-emerald-600" },
-    { label: "Pacientes Vencidas", value: String(data.patients.vencida), tone: "text-red-500" },
-    { label: "Tempo médio de resposta", value: formatSeconds(data.avgResponseSeconds), tone: "text-brand-dark" },
-    { label: "Tempo médio até 1º pagamento", value: formatDays(data.avgDaysToFirstPayment), tone: "text-brand-dark" },
+  const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones }[] = [
+    { label: "Pacientes Ativos", value: String(data.patients.active), icon: "users", tone: "emerald" },
+    { label: "Pacientes Vencidas", value: String(data.patients.vencida), icon: "alert", tone: "red" },
+    { label: "Tempo médio de resposta", value: formatSeconds(data.avgResponseSeconds), icon: "clock", tone: "brand" },
+    {
+      label: "Tempo médio até 1º pagamento",
+      value: formatDays(data.avgDaysToFirstPayment),
+      icon: "calendar",
+      tone: "brand",
+    },
   ];
 
-  const revenueKpis = [
-    { label: "Faturamento Total", value: currencyFormatter.format(data.revenue.total), tone: "text-brand-dark" },
+  const revenueKpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones }[] = [
+    { label: "Faturamento Total", value: currencyFormatter.format(data.revenue.total), icon: "cash", tone: "brand" },
     {
       label: "Ticket Médio",
       value: data.revenue.avgTicket == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgTicket),
-      tone: "text-brand-dark",
+      icon: "tag",
+      tone: "amber",
     },
     {
       label: "LTV Médio",
       value: data.revenue.avgLtv == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgLtv),
-      tone: "text-brand-dark",
+      icon: "trend",
+      tone: "violet",
     },
   ];
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="mb-1 text-lg font-semibold">Dashboard</h1>
-      <p className="mb-6 text-sm text-gray-500">Visão geral de pacientes, atendimento e conversão.</p>
-
-      <div className="grid grid-cols-4 gap-4">
-        {kpis.map((kpi) => (
-          <div key={kpi.label} className="rounded-lg border border-gray-200 bg-white p-4">
-            <p className="text-xs font-medium text-gray-500">{kpi.label}</p>
-            <p className={`mt-1 text-2xl font-semibold ${kpi.tone}`}>{kpi.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 grid grid-cols-3 gap-4">
-        {revenueKpis.map((kpi) => (
-          <div key={kpi.label} className="rounded-lg border border-gray-200 bg-white p-4">
-            <p className="text-xs font-medium text-gray-500">{kpi.label}</p>
-            <p className={`mt-1 text-2xl font-semibold ${kpi.tone}`}>{kpi.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="mb-3 text-sm font-semibold text-gray-700">Conversão em Follow-up</p>
-          <div className="flex gap-6">
-            <div>
-              <p className="text-xs text-gray-500">Média até converter</p>
-              <p className="text-xl font-semibold text-emerald-600">{formatContacts(data.followUpOutcomes.avgConverted)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Média até desistir (Unfollow)</p>
-              <p className="text-xl font-semibold text-red-500">{formatContacts(data.followUpOutcomes.avgLost)}</p>
-            </div>
-          </div>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500">Visão geral de pacientes, atendimento e conversão.</p>
         </div>
+      </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="mb-3 text-sm font-semibold text-gray-700">Mensagens até o 1º pagamento</p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {kpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} />
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {revenueKpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} />
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="Conversão em Follow-up" subtitle="Contatos até a decisão">
+          <div className="flex gap-6">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                <Icon name="check" />
+              </span>
+              <div>
+                <p className="text-xs text-gray-500">Média até converter</p>
+                <p className="text-xl font-semibold text-emerald-600">{formatContacts(data.followUpOutcomes.avgConverted)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <Icon name="alert" />
+              </span>
+              <div>
+                <p className="text-xs text-gray-500">Média até desistir (Unfollow)</p>
+                <p className="text-xl font-semibold text-red-500">{formatContacts(data.followUpOutcomes.avgLost)}</p>
+              </div>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title="Mensagens até o 1º pagamento" subtitle="Volume médio de conversa">
           {data.avgMessagesToFirstPayment ? (
             <div className="flex gap-6">
-              <div>
-                <p className="text-xs text-gray-500">Recebidas</p>
-                <p className="text-xl font-semibold text-gray-800">{Math.round(data.avgMessagesToFirstPayment.inbound)}</p>
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                  <Icon name="chat" />
+                </span>
+                <div>
+                  <p className="text-xs text-gray-500">Recebidas</p>
+                  <p className="text-xl font-semibold text-gray-800">{Math.round(data.avgMessagesToFirstPayment.inbound)}</p>
+                </div>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Enviadas</p>
@@ -151,58 +226,66 @@ export function DashboardPage() {
           ) : (
             <p className="text-sm text-gray-400">Sem pagamentos registrados ainda.</p>
           )}
-        </div>
+        </Panel>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <div className="rounded-lg border border-gray-200 bg-white">
-          <p className="border-b border-gray-100 p-4 text-sm font-semibold text-gray-700">Pagamentos recentes</p>
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="Pagamentos recentes" noPadding>
           {data.recentPayments.length === 0 ? (
-            <p className="p-4 text-sm text-gray-400">Nenhum pagamento registrado ainda.</p>
+            <p className="p-5 text-sm text-gray-400">Nenhum pagamento registrado ainda.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
-                    <th className="px-4 py-2 font-medium">Contato</th>
-                    <th className="px-4 py-2 font-medium">Etapa</th>
-                    <th className="px-4 py-2 font-medium">Dias na etapa</th>
-                    <th className="px-4 py-2 font-medium">Valor</th>
+                    <th className="px-5 py-2 font-medium">Contato</th>
+                    <th className="px-5 py-2 font-medium">Etapa</th>
+                    <th className="px-5 py-2 font-medium">Dias na etapa</th>
+                    <th className="px-5 py-2 font-medium">Valor</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.recentPayments.map((p) => (
-                    <tr key={p.id} className="border-t border-gray-100">
-                      <td className="px-4 py-2">
-                        {p.contactName?.trim() || `+${p.phoneNumber}`}
-                        <span className="block text-xs text-gray-400">{dateFormatter.format(new Date(p.paidAt))}</span>
-                      </td>
-                      <td className="px-4 py-2 text-gray-600">{p.stageName}</td>
-                      <td className="px-4 py-2 text-gray-600">
-                        {p.daysInStage == null ? "—" : `${Math.max(0, Math.round(p.daysInStage))}d`}
-                      </td>
-                      <td className="px-4 py-2 font-medium text-brand-dark">{currencyFormatter.format(p.value)}</td>
-                    </tr>
-                  ))}
+                  {data.recentPayments.map((p) => {
+                    const name = p.contactName?.trim() || `+${p.phoneNumber}`;
+                    return (
+                      <tr key={p.id} className="border-t border-gray-100">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
+                              {name.charAt(0).toUpperCase()}
+                            </span>
+                            <div>
+                              <p className="font-medium text-gray-800">{name}</p>
+                              <p className="text-xs text-gray-400">{dateFormatter.format(new Date(p.paidAt))}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-gray-600">{p.stageName}</td>
+                        <td className="px-5 py-3 text-gray-600">
+                          {p.daysInStage == null ? "—" : `${Math.max(0, Math.round(p.daysInStage))}d`}
+                        </td>
+                        <td className="px-5 py-3 font-medium text-brand-dark">{currencyFormatter.format(p.value)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
-        </div>
+        </Panel>
 
-        <div className="rounded-lg border border-gray-200 bg-white">
-          <p className="border-b border-gray-100 p-4 text-sm font-semibold text-gray-700">Cohort por mês de chegada (abas)</p>
+        <Panel title="Cohort por mês de chegada" subtitle="Toque na lupa para ver a origem dos leads">
           {data.cohorts.length === 0 ? (
-            <p className="p-4 text-sm text-gray-400">Sem contatos registrados ainda.</p>
+            <p className="text-sm text-gray-400">Sem contatos registrados ainda.</p>
           ) : (
-            <div className="space-y-3 p-4">
+            <div className="space-y-4">
               {data.cohorts.map((c) => {
                 const pct = c.totalLeads > 0 ? Math.round((c.convertedCount / c.totalLeads) * 100) : 0;
                 const isExpanded = expandedCohort === c.label;
                 const maxChannelLeads = Math.max(1, ...c.channels.map((ch) => ch.totalLeads));
                 return (
                   <div key={c.label}>
-                    <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                    <div className="mb-1.5 flex items-center justify-between text-xs text-gray-600">
                       <span className="flex items-center gap-1.5 font-medium text-gray-700">
                         {c.label}
                         {c.channels.length > 0 && (
@@ -217,15 +300,15 @@ export function DashboardPage() {
                           </button>
                         )}
                       </span>
-                      <span>
+                      <span className="font-medium text-gray-500">
                         {c.convertedCount} de {c.totalLeads} leads · {pct}%
                       </span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                      <div className="h-full rounded-full bg-brand-dark" style={{ width: `${pct}%` }} />
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
                     </div>
                     {isExpanded && c.channels.length > 0 && (
-                      <div className="mt-2 space-y-1.5 rounded-md bg-gray-50 p-3">
+                      <div className="mt-2 space-y-1.5 rounded-xl bg-gray-50 p-3">
                         {c.channels.map((ch) => {
                           const chPct = ch.totalLeads > 0 ? Math.round((ch.convertedCount / ch.totalLeads) * 100) : 0;
                           const barWidth = Math.round((ch.totalLeads / maxChannelLeads) * 100);
@@ -250,7 +333,7 @@ export function DashboardPage() {
               })}
             </div>
           )}
-        </div>
+        </Panel>
       </div>
     </div>
   );

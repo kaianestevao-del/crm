@@ -2,6 +2,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { MODULE_KEYS, MODULE_LABELS, ModuleKey, Role } from "@crm/shared";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { Icon } from "../components/Icon";
+
+const roleBadgeTone: Record<Role, string> = {
+  [Role.OWNER]: "bg-brand/10 text-brand-dark",
+  [Role.ADMIN]: "bg-blue-50 text-blue-600",
+  [Role.AGENT]: "bg-gray-100 text-gray-600",
+};
 
 interface TeamMember {
   membershipId: string;
@@ -128,30 +135,37 @@ export function TeamPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="mb-1 text-lg font-semibold">Equipe</h1>
-      <p className="mb-6 max-w-2xl text-sm text-gray-500">
-        Pessoas com acesso a esta organização. Remover alguém da equipe não apaga nada que essa pessoa já fez —
-        mensagens, negócios e anotações continuam com o nome dela. Dono(a) e Administrador(a) sempre veem tudo;
-        o acesso por área abaixo só se aplica a Atendentes.
-      </p>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold text-gray-900">Equipe</h1>
+        <p className="mt-1 max-w-2xl text-sm text-gray-500">
+          Pessoas com acesso a esta organização. Remover alguém da equipe não apaga nada que essa pessoa já fez —
+          mensagens, negócios e anotações continuam com o nome dela. Dono(a) e Administrador(a) sempre veem tudo;
+          o acesso por área abaixo só se aplica a Atendentes.
+        </p>
+      </div>
 
       <div className="max-w-2xl space-y-2">
         {members.map((member) => (
-          <div key={member.membershipId} className="rounded-lg border border-gray-200 bg-white p-4">
+          <div key={member.membershipId} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">
-                  {member.name} {member.id === user?.id && <span className="text-xs text-gray-400">(você)</span>}
-                </p>
-                <p className="text-xs text-gray-500">{member.email}</p>
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-sm font-semibold text-gray-600">
+                  {member.name.charAt(0).toUpperCase()}
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {member.name} {member.id === user?.id && <span className="text-xs text-gray-400">(você)</span>}
+                  </p>
+                  <p className="text-xs text-gray-500">{member.email}</p>
+                </div>
               </div>
               {canManage && member.id !== user?.id ? (
                 <div className="flex items-center gap-3">
                   <select
                     value={member.role}
                     onChange={(e) => handleRoleChange(member.membershipId, e.target.value as Role)}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                    className="rounded-lg border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
                   >
                     <option value={Role.AGENT}>Atendente</option>
                     <option value={Role.ADMIN}>Administrador(a)</option>
@@ -170,7 +184,9 @@ export function TeamPage() {
                   </button>
                 </div>
               ) : (
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{roleLabel[member.role]}</span>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${roleBadgeTone[member.role]}`}>
+                  {roleLabel[member.role]}
+                </span>
               )}
             </div>
             {member.role === Role.AGENT && editingAccessFor === member.membershipId && (
@@ -184,38 +200,42 @@ export function TeamPage() {
             )}
           </div>
         ))}
-        {members.length === 0 && <p className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-400">Nenhum membro encontrado.</p>}
+        {members.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-gray-200 bg-white p-4 text-sm text-gray-400">
+            Nenhum membro encontrado.
+          </p>
+        )}
       </div>
 
       {canManage && (
         <div className="mt-4 max-w-2xl">
           {showForm ? (
-            <form onSubmit={handleCreate} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-              <p className="text-sm font-medium">Adicionar funcionário(a)</p>
+            <form onSubmit={handleCreate} className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-medium text-gray-900">Adicionar funcionário(a)</p>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Nome"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="E-mail (será o login dessa pessoa)"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Senha inicial (mínimo 8 caracteres)"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as Role)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               >
                 <option value={Role.AGENT}>Atendente</option>
                 <option value={Role.ADMIN}>Administrador(a)</option>
@@ -228,13 +248,13 @@ export function TeamPage() {
               )}
               {error && <p className="text-xs text-red-600">{error}</p>}
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={resetForm} className="rounded-md px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">
+                <button type="button" onClick={resetForm} className="rounded-xl px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={creating || !name.trim() || !email.trim() || password.length < 8}
-                  className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  className="rounded-xl bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
                   Adicionar
                 </button>
@@ -243,9 +263,10 @@ export function TeamPage() {
           ) : (
             <button
               onClick={() => setShowForm(true)}
-              className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              className="flex items-center gap-1.5 rounded-xl bg-brand-dark px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
             >
-              + Adicionar funcionário
+              <Icon name="plus" className="h-4 w-4" />
+              Adicionar funcionário
             </button>
           )}
         </div>

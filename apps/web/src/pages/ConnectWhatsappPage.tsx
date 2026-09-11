@@ -77,7 +77,7 @@ function CopyLinkButton({ link }: { link: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="whitespace-nowrap rounded-md bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90"
+      className="whitespace-nowrap rounded-xl bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90"
     >
       {copied ? "Copiado!" : "Copiar link"}
     </button>
@@ -106,24 +106,24 @@ function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneN
   }
 
   return (
-    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
       <form onSubmit={handleCreate} className="mb-3 space-y-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Nome do link (ex: Bio do Instagram, Anúncio de setembro)"
-          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+          className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
         />
         <input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Mensagem pré-preenchida (opcional)"
-          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+          className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
         />
         <button
           type="submit"
           disabled={!name.trim()}
-          className="rounded-md bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-xl bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           Salvar link
         </button>
@@ -134,7 +134,7 @@ function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneN
       ) : (
         <ul className="space-y-2">
           {links.map((link) => (
-            <li key={link.id} className="rounded-md border border-gray-200 bg-white p-2">
+            <li key={link.id} className="rounded-xl border border-gray-200 bg-white p-2">
               <div className="mb-1 flex items-center justify-between gap-2">
                 <p className="truncate text-xs font-medium text-gray-700">{link.name}</p>
                 <button onClick={() => handleDelete(link.id)} className="text-[10px] font-medium text-red-600 hover:underline">
@@ -145,7 +145,7 @@ function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneN
                 <input
                   readOnly
                   value={buildWaLink(phoneNumber, link.message)}
-                  className="flex-1 truncate rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-600"
+                  className="flex-1 truncate rounded-xl border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-600"
                 />
                 <CopyLinkButton link={buildWaLink(phoneNumber, link.message)} />
               </div>
@@ -190,7 +190,7 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
   }
 
   return (
-    <form onSubmit={handleSave} className="mt-3 space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
+    <form onSubmit={handleSave} className="mt-3 space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
       <p className="text-xs font-medium text-gray-600">Atualizar credenciais da API Oficial</p>
       <p className="text-[10px] text-gray-400">
         Preencha só o que precisa trocar — o que ficar em branco continua com o valor salvo antes.
@@ -200,20 +200,20 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         onChange={(e) => setAccessToken(e.target.value)}
         placeholder="Novo Access Token"
         type="password"
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+        className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
       />
       <input
         value={appSecret}
         onChange={(e) => setAppSecret(e.target.value)}
         placeholder="Novo App Secret (opcional)"
         type="password"
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+        className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
       />
       <input
         value={phoneNumberId}
         onChange={(e) => setPhoneNumberId(e.target.value)}
         placeholder="Novo Phone Number ID (opcional)"
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+        className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
       />
       <div className="flex items-center justify-end gap-2">
         {saved && <span className="text-xs text-green-600">Salvo!</span>}
@@ -223,7 +223,7 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         <button
           type="submit"
           disabled={saving || (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim())}
-          className="rounded-md bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-xl bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           Salvar
         </button>
@@ -347,8 +347,8 @@ export function ConnectWhatsappPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="mb-1 text-lg font-semibold">Conexão com o WhatsApp</h1>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <h1 className="mb-1 text-lg font-semibold text-gray-900">Conexão com o WhatsApp</h1>
       <p className="mb-6 text-sm text-gray-500">
         Conecte um número de WhatsApp escaneando o QR Code, como no WhatsApp Web. Por padrão, cada organização tem
         apenas uma conexão ativa por vez.
@@ -361,12 +361,12 @@ export function ConnectWhatsappPage() {
       )}
 
       {sessions.length === 0 && (
-        <form onSubmit={handleCreate} className="mb-6 max-w-xl rounded-lg border border-gray-200 bg-white p-4">
+        <form onSubmit={handleCreate} className="mb-6 max-w-xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Nome do número (ex: Comercial, Suporte)"
-            className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            className="mb-3 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
           />
 
           <div className="mb-3 flex flex-wrap gap-4 text-sm">
@@ -389,12 +389,12 @@ export function ConnectWhatsappPage() {
               value={pairingPhoneNumber}
               onChange={(e) => setPairingPhoneNumber(e.target.value)}
               placeholder="Número do funcionário com DDI e DDD (ex: 5511999998888)"
-              className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className="mb-3 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
             />
           )}
 
           {connectMethod === "cloud" && (
-            <div className="mb-3 space-y-2 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
+            <div className="mb-3 space-y-2 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3">
               <p className="text-xs text-gray-500">
                 Use quando o número já está cadastrado na WhatsApp Business Platform da Meta (Cloud API) — cole as
                 credenciais do seu App em Meta for Developers.
@@ -403,21 +403,21 @@ export function ConnectWhatsappPage() {
                 value={cloudPhoneNumberId}
                 onChange={(e) => setCloudPhoneNumberId(e.target.value)}
                 placeholder="Phone Number ID"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
               <input
                 value={cloudAccessToken}
                 onChange={(e) => setCloudAccessToken(e.target.value)}
                 placeholder="Access Token"
                 type="password"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
               <input
                 value={cloudAppSecret}
                 onChange={(e) => setCloudAppSecret(e.target.value)}
                 placeholder="App Secret"
                 type="password"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
               />
             </div>
           )}
@@ -430,7 +430,7 @@ export function ConnectWhatsappPage() {
               (connectMethod === "code" && !pairingPhoneNumber.trim()) ||
               (connectMethod === "cloud" && (!cloudPhoneNumberId.trim() || !cloudAccessToken.trim() || !cloudAppSecret.trim()))
             }
-            className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             Conectar novo número
           </button>
@@ -438,7 +438,7 @@ export function ConnectWhatsappPage() {
       )}
 
       {cloudWebhookInfo && (
-        <div className="mb-6 max-w-xl rounded-lg border border-brand bg-brand/5 p-4 text-sm">
+        <div className="mb-6 max-w-xl rounded-2xl border border-brand bg-brand/5 p-4 text-sm">
           <p className="mb-2 font-medium text-brand-dark">Configure o webhook no painel da Meta</p>
           <p className="mb-2 text-xs text-gray-600">
             Em Meta for Developers → seu App → WhatsApp → Configuração → Webhook, cole:
@@ -461,7 +461,7 @@ export function ConnectWhatsappPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {sessions.map((session) => (
-          <div key={session.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div key={session.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-2 flex items-center justify-between">
               <p className="font-medium">
                 {session.name}
@@ -478,7 +478,7 @@ export function ConnectWhatsappPage() {
               <img src={session.qrCode} alt="QR Code" className="mx-auto h-48 w-48" />
             )}
             {session.provider === "BAILEYS" && session.status === SessionStatus.PENDING && session.pairingCode && (
-              <div className="rounded-md bg-gray-50 py-6 text-center">
+              <div className="rounded-xl bg-gray-50 py-6 text-center">
                 <p className="mb-1 text-xs text-gray-500">Digite este código no WhatsApp do funcionário</p>
                 <p className="mb-1 text-xs text-gray-400">
                   Aparelhos conectados → Conectar um aparelho → Conectar com número de telefone

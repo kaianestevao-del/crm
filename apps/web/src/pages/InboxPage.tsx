@@ -17,6 +17,7 @@ import { AudioRecorderBar } from "../components/AudioRecorderBar";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { NewConversationModal } from "../components/NewConversationModal";
 import { ScheduledMessages } from "../components/ScheduledMessages";
+import { Icon } from "../components/Icon";
 
 interface Contact {
   id: string;
@@ -100,8 +101,8 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <div
-      className={`max-w-md rounded-lg px-3 py-2 text-sm ${
-        outbound ? "ml-auto bg-brand-dark text-white" : "bg-white text-gray-900 shadow-sm"
+      className={`max-w-md rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
+        outbound ? "ml-auto bg-brand-dark text-white" : "bg-white text-gray-900"
       }`}
     >
       {message.revokedAt && (
@@ -110,9 +111,9 @@ function MessageBubble({ message }: { message: Message }) {
         </p>
       )}
       {message.type === MessageType.IMAGE && mediaSrc && (
-        <img src={mediaSrc} alt="" className="mb-1 max-h-64 rounded-md object-cover" />
+        <img src={mediaSrc} alt="" className="mb-1 max-h-64 rounded-xl object-cover" />
       )}
-      {message.type === MessageType.VIDEO && mediaSrc && <video src={mediaSrc} controls className="mb-1 max-h-64 rounded-md" />}
+      {message.type === MessageType.VIDEO && mediaSrc && <video src={mediaSrc} controls className="mb-1 max-h-64 rounded-xl" />}
       {message.type === MessageType.AUDIO && mediaSrc && (
         <>
           <audio src={mediaSrc} controls className="mb-1 max-w-full" />
@@ -409,35 +410,37 @@ export function InboxPage() {
   const selectedConversation = conversations.find((c) => c.id === selectedId) ?? null;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-gray-50">
       <div className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-          <p className="text-sm font-semibold">Conversas</p>
+        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-3">
+          <p className="text-sm font-semibold text-gray-900">Conversas</p>
           <div className="flex gap-2">
             <button
               onClick={() => setShowFilters((v) => !v)}
-              className={`rounded-md border px-2 py-1 text-xs font-medium hover:bg-gray-50 ${
-                activeFilterCount > 0 ? "border-brand-dark text-brand-dark" : "border-gray-300 text-gray-600"
+              className={`flex items-center gap-1 rounded-xl border px-2 py-1 text-xs font-medium hover:bg-gray-50 ${
+                activeFilterCount > 0 ? "border-brand-dark bg-brand/5 text-brand-dark" : "border-gray-200 text-gray-600"
               }`}
             >
-              🔎 Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+              <Icon name="filter" className="h-3.5 w-3.5" />
+              Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
             </button>
             <button
               onClick={() => setShowNewConversation(true)}
-              className="rounded-md bg-brand-dark px-2 py-1 text-xs font-medium text-white hover:opacity-90"
+              className="flex items-center gap-1 rounded-xl bg-brand-dark px-2 py-1 text-xs font-medium text-white shadow-sm hover:opacity-90"
             >
-              + Nova conversa
+              <Icon name="plus" className="h-3.5 w-3.5" />
+              Nova conversa
             </button>
           </div>
         </div>
         <div className="border-b border-gray-100 p-2">
           <div className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            <Icon name="search" className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome ou telefone..."
-              className="w-full rounded-md border border-gray-300 py-1.5 pl-7 pr-2 text-sm focus:border-brand focus:outline-none"
+              className="w-full rounded-xl border border-gray-200 py-1.5 pl-8 pr-2 text-sm focus:border-brand focus:outline-none"
             />
           </div>
         </div>
@@ -540,22 +543,22 @@ export function InboxPage() {
             )}
           </div>
         )}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 space-y-1 overflow-y-auto p-2">
           {visibleConversations.map((conversation) => (
             <div
               key={conversation.id}
-              className={`group relative border-b border-gray-100 hover:bg-gray-50 ${
-                selectedId === conversation.id ? "bg-brand/5" : ""
+              className={`group relative rounded-xl ${
+                selectedId === conversation.id ? "bg-brand/10" : "hover:bg-gray-50"
               }`}
             >
-              <button onClick={() => selectConversation(conversation.id)} className="block w-full px-4 py-3 pr-9 text-left">
-                <div className="flex items-center gap-2">
-                  <ContactAvatar contact={conversation.contact} size={32} />
+              <button onClick={() => selectConversation(conversation.id)} className="block w-full px-3 py-2.5 pr-9 text-left">
+                <div className="flex items-center gap-2.5">
+                  <ContactAvatar contact={conversation.contact} size={34} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
-                      <p className="truncate text-sm font-medium">{contactLabel(conversation.contact)}</p>
+                      <p className="truncate text-sm font-medium text-gray-800">{contactLabel(conversation.contact)}</p>
                       {conversation.unreadCount > 0 && (
-                        <span className="rounded-full bg-brand-dark px-2 py-0.5 text-xs font-medium text-white">
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-dark px-1.5 text-xs font-medium text-white">
                           {conversation.unreadCount}
                         </span>
                       )}
@@ -570,14 +573,14 @@ export function InboxPage() {
                   e.stopPropagation();
                   setMenuOpenFor((v) => (v === conversation.id ? null : conversation.id));
                 }}
-                className="absolute right-2 top-3 rounded px-1 text-gray-400 opacity-0 hover:bg-gray-200 group-hover:opacity-100"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-1.5 py-1 text-gray-400 opacity-0 hover:bg-gray-200 group-hover:opacity-100"
                 title="Mais opções"
               >
                 ⋮
               </button>
 
               {menuOpenFor === conversation.id && (
-                <div className="absolute right-2 top-9 z-10 w-48 rounded-md border border-gray-200 bg-white py-1 text-sm shadow-lg">
+                <div className="absolute right-2 top-11 z-10 w-48 rounded-xl border border-gray-200 bg-white py-1 text-sm shadow-lg">
                   <button
                     onClick={() => handleMarkUnread(conversation.id)}
                     className="block w-full px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50"
@@ -635,7 +638,7 @@ export function InboxPage() {
                           if (e.key === "Enter") saveContactName();
                           if (e.key === "Escape") setEditingContactName(false);
                         }}
-                        className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                        className="w-40 rounded-xl border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none"
                       />
                       <button
                         onClick={saveContactName}
@@ -665,33 +668,33 @@ export function InboxPage() {
                   <button
                     onClick={handleExport}
                     disabled={exporting}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                   >
                     ⬇️ Baixar histórico
                   </button>
                   <button
                     onClick={() => setShowTranscriptionSettings((v) => !v)}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                   >
                     🗒️ Transcrição
                   </button>
                   {showTranscriptionSettings && <TranscriptionSettings onClose={() => setShowTranscriptionSettings(false)} />}
                   <button
                     onClick={() => setShowSignatureSettings((v) => !v)}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                   >
                     ✍️ Assinatura
                   </button>
                   {showSignatureSettings && <SignatureSettings onClose={() => setShowSignatureSettings(false)} />}
                   <button
                     onClick={() => setShowNotes((v) => !v)}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                   >
                     📝 Anotações
                   </button>
                   <button
                     onClick={() => setShowScheduledMessages((v) => !v)}
-                    className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
                   >
                     📅 Agendar
                   </button>
@@ -751,7 +754,7 @@ export function InboxPage() {
               {showQuickReplies && <QuickReplyPicker onPick={handlePickQuickReply} onClose={() => setShowQuickReplies(false)} />}
 
               {pendingQuickReply && (
-                <div className="mb-2 flex items-center justify-between rounded-md border border-brand bg-brand/5 px-3 py-2 text-xs">
+                <div className="mb-2 flex items-center justify-between rounded-xl border border-brand bg-brand/5 px-3 py-2 text-xs">
                   <span>
                     Pré-visualizando resposta rápida: <strong>{pendingQuickReply.title}</strong>
                     {pendingQuickReply.type !== "TEXT" && " (mídia anexada)"}
@@ -771,7 +774,7 @@ export function InboxPage() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={audioRecorder.state !== "idle"}
                   title="Anexar arquivo"
-                  className="rounded-md border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-xl border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                 >
                   📎
                 </button>
@@ -780,7 +783,7 @@ export function InboxPage() {
                   onClick={audioRecorder.start}
                   disabled={audioRecorder.state !== "idle"}
                   title="Gravar áudio"
-                  className="rounded-md border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-xl border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                 >
                   🎙️
                 </button>
@@ -788,7 +791,7 @@ export function InboxPage() {
                   type="button"
                   onClick={() => setShowQuickReplies((v) => !v)}
                   title="Respostas rápidas"
-                  className="rounded-md border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50"
+                  className="rounded-xl border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50"
                 >
                   ⚡
                 </button>
@@ -796,12 +799,12 @@ export function InboxPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   placeholder={pendingQuickReply ? "Edite antes de enviar (opcional)..." : "Digite uma mensagem..."}
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
                 />
                 <button
                   type="submit"
                   disabled={sending}
-                  className="rounded-md bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
                   Enviar
                 </button>

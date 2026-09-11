@@ -61,14 +61,14 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="mb-1 text-lg font-semibold">Configurações</h1>
+    <div className="h-full overflow-y-auto bg-gray-50 p-6">
+      <h1 className="mb-1 text-lg font-semibold text-gray-900">Configurações</h1>
       <p className="mb-6 max-w-2xl text-sm text-gray-500">
         Ajustes gerais da organização usados pelo Dashboard e pelo Funil.
       </p>
 
       <div className="max-w-2xl space-y-6">
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="mb-1 text-sm font-medium">Meta de mensagens no Follow-up</p>
           <p className="mb-3 text-xs text-gray-500">
             Quantidade de mensagens que conta como "completar" a sequência de follow-up de um lead — aparece como
@@ -83,12 +83,12 @@ export function SettingsPage() {
                 setFollowUpTarget(e.target.value);
                 setTargetSaved(false);
               }}
-              className="w-24 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="w-24 rounded-xl border border-gray-300 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
             />
             <button
               onClick={handleSaveTarget}
               disabled={savingTarget || !followUpTarget.trim()}
-              className="rounded-md bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              className="rounded-xl bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               Salvar
             </button>
@@ -96,7 +96,7 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="mb-1 text-sm font-medium">Papel das etapas do Funil</p>
           <p className="mb-3 text-xs text-gray-500">
             Diz ao Dashboard o que cada etapa representa (paciente ativo, vencido, follow-up ou perdido), para
@@ -110,14 +110,14 @@ export function SettingsPage() {
                 .slice()
                 .sort((a, b) => a.order - b.order)
                 .map((stage) => (
-                  <div key={stage.id} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 px-3 py-2">
+                  <div key={stage.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-3 py-2">
                     <span className="text-sm text-gray-700">{stage.name}</span>
                     <div className="flex items-center gap-2">
                       <select
                         value={stage.role ?? ""}
                         onChange={(e) => handleStageRoleChange(stage.id, e.target.value as PipelineStageRole | "")}
                         disabled={savingStageId === stage.id}
-                        className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                        className="rounded-xl border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
                       >
                         <option value="">Nenhum</option>
                         {PIPELINE_STAGE_ROLES.map((role) => (
