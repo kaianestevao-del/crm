@@ -18,7 +18,8 @@ export type IconName =
   | "filter"
   | "download"
   | "edit"
-  | "plus";
+  | "plus"
+  | "link";
 
 const paths: Record<IconName, JSX.Element> = {
   grid: (
@@ -144,6 +145,12 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <path d="M12 5v14" />
       <path d="M5 12h14" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L12.5 19.5" />
     </>
   ),
 };

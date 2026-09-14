@@ -4,6 +4,7 @@ import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, ORIGI
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
+import { EmojiPicker } from "../components/EmojiPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
 import { ContactTimeline } from "../components/ContactTimeline";
@@ -88,14 +89,45 @@ const MEDIA_PREVIEW_LABEL: Partial<Record<MessageType, string>> = {
   [MessageType.AUDIO]: "🎤 Áudio",
   [MessageType.VIDEO]: "🎞️ Vídeo",
   [MessageType.DOCUMENT]: "📄 Documento",
+  [MessageType.CONTACT]: "👤 Contato",
+  [MessageType.LOCATION]: "📍 Localização",
+  [MessageType.UNKNOWN]: "Mensagem não suportada",
 };
 
 function messagePreview(message: Message | undefined) {
   if (!message) return "Sem mensagens";
+  if (message.type === MessageType.CONTACT) return "👤 Contato: " + (message.content?.split("|")[0]?.split("\n")[0] ?? "");
   return message.content || MEDIA_PREVIEW_LABEL[message.type] || "Sem mensagens";
 }
 
-function MessageBubble({ message }: { message: Message }) {
+// Cloud API and Baileys both hand shared-contact text over as one "Name|phone" pair per line
+// (see formatCloudContactsText / formatBaileysContactsText on the worker) — this is the other
+// half of that convention.
+function parseSharedContacts(content: string | null): { name: string; phone: string | null }[] {
+  if (!content) return [];
+  return content.split("\n").map((line) => {
+    const [name, phone] = line.split("|");
+    return { name: name || "Contato sem nome", phone: phone || null };
+  });
+}
+
+function formatMessageTime(iso: string) {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const today = new Date();
+  const isToday = date.toDateString() === today.toDateString();
+  if (isToday) return time;
+  const dateLabel = date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return `${dateLabel} ${time}`;
+}
+
+function MessageBubble({
+  message,
+  onStartConversationWithContact,
+}: {
+  message: Message;
+  onStartConversationWithContact: (phoneNumber: string, name: string) => void;
+}) {
   const outbound = message.direction === MessageDirection.OUTBOUND;
   const mediaSrc = message.mediaUrl ? `${API_URL}${message.mediaUrl}` : null;
 
@@ -136,13 +168,52 @@ function MessageBubble({ message }: { message: Message }) {
           📄 Abrir documento
         </a>
       )}
-      {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
-      {outbound && (
-        <p className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-white/70">
-          {message.status === MessageStatus.FAILED && <span>Falha ao enviar</span>}
-          <MessageStatusIndicator status={message.status} />
-        </p>
+      {message.type === MessageType.CONTACT && (
+        <div className="mb-1 space-y-1.5">
+          {parseSharedContacts(message.content).map((c, i) => (
+            <div
+              key={i}
+              className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${
+                outbound ? "border-white/30" : "border-gray-200"
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">👤 {c.name}</p>
+                {c.phone && <p className={`truncate text-xs ${outbound ? "text-white/70" : "text-gray-500"}`}>+{c.phone}</p>}
+              </div>
+              {c.phone && (
+                <button
+                  type="button"
+                  onClick={() => onStartConversationWithContact(c.phone!, c.name)}
+                  className={`shrink-0 rounded-lg px-2 py-1 text-xs font-medium ${
+                    outbound ? "bg-white/20 hover:bg-white/30" : "bg-brand/10 text-brand-dark hover:bg-brand/20"
+                  }`}
+                >
+                  Conversar
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
+      {message.type === MessageType.LOCATION && message.content && (
+        <a
+          href={`https://www.google.com/maps?q=${encodeURIComponent(message.content.split("\n").pop() ?? "")}`}
+          target="_blank"
+          rel="noreferrer"
+          className={`mb-1 flex items-center gap-1 underline ${outbound ? "text-white" : "text-brand-dark"}`}
+        >
+          📍 {message.content.split("\n")[0] || "Ver localização"}
+        </a>
+      )}
+      {message.content && message.type !== MessageType.CONTACT && message.type !== MessageType.LOCATION && (
+        <p className="whitespace-pre-wrap">{message.content}</p>
+      )}
+      <p className={`mt-0.5 flex items-center justify-end gap-1 text-[11px] ${outbound ? "text-white/70" : "text-gray-400"}`}>
+        {formatMessageTime(message.createdAt)}
+        {outbound && message.status === MessageStatus.FAILED && <span>Falha ao enviar</span>}
+        {outbound && <MessageStatusIndicator status={message.status} />}
+      </p>
     </div>
   );
 }
@@ -158,6 +229,7 @@ export function InboxPage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [showSignatureSettings, setShowSignatureSettings] = useState(false);
   const [showTranscriptionSettings, setShowTranscriptionSettings] = useState(false);
@@ -352,6 +424,13 @@ export function InboxPage() {
     setShowNewConversation(false);
     await refreshConversations();
     await selectConversation(conversationId);
+  }
+
+  // Used by the "Conversar" button on a shared-contact bubble — same endpoint the "Nova
+  // conversa" modal uses, just triggered from inside a message instead of a form.
+  async function startConversationWithPhone(phoneNumber: string, name: string) {
+    const res = await api.post("/conversations/start", { phoneNumber, name: name || undefined });
+    await handleConversationCreated(res.data.id);
   }
 
   function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
@@ -746,12 +825,18 @@ export function InboxPage() {
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-4">
               {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+                <MessageBubble key={message.id} message={message} onStartConversationWithContact={startConversationWithPhone} />
               ))}
               <div ref={bottomRef} />
             </div>
             <form onSubmit={handleSend} className="relative border-t border-gray-200 bg-white p-3">
               {showQuickReplies && <QuickReplyPicker onPick={handlePickQuickReply} onClose={() => setShowQuickReplies(false)} />}
+              {showEmojiPicker && (
+                <EmojiPicker
+                  onPick={(emoji) => setDraft((prev) => prev + emoji)}
+                  onClose={() => setShowEmojiPicker(false)}
+                />
+              )}
 
               {pendingQuickReply && (
                 <div className="mb-2 flex items-center justify-between rounded-xl border border-brand bg-brand/5 px-3 py-2 text-xs">
@@ -794,6 +879,14 @@ export function InboxPage() {
                   className="rounded-xl border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50"
                 >
                   ⚡
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker((v) => !v)}
+                  title="Emojis"
+                  className="rounded-xl border border-gray-300 px-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  😊
                 </button>
                 <input
                   value={draft}

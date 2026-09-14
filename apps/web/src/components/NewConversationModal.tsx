@@ -20,7 +20,7 @@ export function NewConversationModal({
     setError(null);
     try {
       const res = await api.post("/conversations/start", {
-        phoneNumber: phoneNumber.trim(),
+        phoneNumber: `55${phoneNumber.trim()}`,
         name: name.trim() || undefined,
       });
       onCreated(res.data.id);
@@ -47,14 +47,17 @@ export function NewConversationModal({
         </p>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Número de WhatsApp (com DDD)</label>
-            <input
-              autoFocus
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              placeholder="Ex: 5511999998888"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-            />
+            <label className="mb-1 block text-xs font-medium text-gray-600">Número de WhatsApp (DDD + número)</label>
+            <div className="flex items-center overflow-hidden rounded-md border border-gray-300 focus-within:border-brand">
+              <span className="border-r border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500">+55</span>
+              <input
+                autoFocus
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ""))}
+                placeholder="Ex: 11999998888"
+                className="w-full px-3 py-2 text-sm focus:outline-none"
+              />
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Nome (opcional)</label>

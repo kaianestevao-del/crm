@@ -12,6 +12,7 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
   { to: "/whatsapp", label: "Conexão WhatsApp", icon: "phone", ownerOrAdminOnly: true },
   { to: "/equipe", label: "Equipe", icon: "team", ownerOrAdminOnly: true },
   { to: "/configuracoes", label: "Configurações", icon: "settings", ownerOrAdminOnly: true },
+  { to: "/links", label: "Links & Contatos", icon: "link" },
 ];
 
 export function Layout() {

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import axios from "axios";
 import { SessionStatus } from "@crm/shared";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
@@ -31,148 +32,19 @@ function formatPairingCode(code: string) {
   return code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
 }
 
-interface CustomLink {
-  id: string;
-  name: string;
-  message: string;
-}
-
-function buildWaLink(phoneNumber: string, message: string) {
-  return `https://wa.me/${phoneNumber}${message.trim() ? `?text=${encodeURIComponent(message.trim())}` : ""}`;
-}
-
-// Saved locally in the browser (no backend/DB involved) — one list of link presets per
-// WhatsApp connection, so a person setting up multiple links (bio, ads, etc.) doesn't have to
-// retype the message every time. Lives only on this device/browser.
-function loadSavedLinks(sessionId: string): CustomLink[] {
-  try {
-    const raw = localStorage.getItem(`wa-custom-links:${sessionId}`);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSavedLinks(sessionId: string, links: CustomLink[]) {
-  try {
-    localStorage.setItem(`wa-custom-links:${sessionId}`, JSON.stringify(links));
-  } catch {
-    // Storage unavailable (private mode, quota) — links just won't persist across reloads.
-  }
-}
-
-function CopyLinkButton({ link }: { link: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API unavailable — the link is still selectable/copyable from the input.
-    }
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="whitespace-nowrap rounded-xl bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90"
-    >
-      {copied ? "Copiado!" : "Copiar link"}
-    </button>
-  );
-}
-
-function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneNumber: string }) {
-  const [links, setLinks] = useState<CustomLink[]>(() => loadSavedLinks(sessionId));
-  const [name, setName] = useState("");
-  const [message, setMessage] = useState("");
-
-  function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    const next = [...links, { id: crypto.randomUUID(), name: name.trim(), message: message.trim() }];
-    setLinks(next);
-    saveSavedLinks(sessionId, next);
-    setName("");
-    setMessage("");
-  }
-
-  function handleDelete(id: string) {
-    const next = links.filter((l) => l.id !== id);
-    setLinks(next);
-    saveSavedLinks(sessionId, next);
-  }
-
-  return (
-    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
-      <form onSubmit={handleCreate} className="mb-3 space-y-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Nome do link (ex: Bio do Instagram, Anúncio de setembro)"
-          className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
-        />
-        <input
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Mensagem pré-preenchida (opcional)"
-          className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!name.trim()}
-          className="rounded-xl bg-brand-dark px-2 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          Salvar link
-        </button>
-      </form>
-
-      {links.length === 0 ? (
-        <p className="text-xs text-gray-400">Nenhum link salvo ainda para este número.</p>
-      ) : (
-        <ul className="space-y-2">
-          {links.map((link) => (
-            <li key={link.id} className="rounded-xl border border-gray-200 bg-white p-2">
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="truncate text-xs font-medium text-gray-700">{link.name}</p>
-                <button onClick={() => handleDelete(link.id)} className="text-[10px] font-medium text-red-600 hover:underline">
-                  Apagar
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  readOnly
-                  value={buildWaLink(phoneNumber, link.message)}
-                  className="flex-1 truncate rounded-xl border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-600"
-                />
-                <CopyLinkButton link={buildWaLink(phoneNumber, link.message)} />
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="mt-2 text-[10px] text-gray-400">
-        Salve um link por canal (bio, site, Instagram) para que qualquer pessoa abra uma conversa com este número no
-        WhatsApp já com a mensagem certa preenchida. Os links ficam salvos neste navegador.
-      </p>
-    </div>
-  );
-}
-
 function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [accessToken, setAccessToken] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     if (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim()) return;
     setSaving(true);
+    setError(null);
     try {
       await api.patch(`/whatsapp-sessions/${sessionId}/cloud-api-credentials`, {
         cloudApiAccessToken: accessToken.trim() || undefined,
@@ -184,6 +56,13 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
       setPhoneNumberId("");
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      const code = axios.isAxiosError(err) ? (err.response?.data as { error?: string } | undefined)?.error : undefined;
+      setError(
+        code === "cloud_api_credentials_invalid"
+          ? "Meta recusou esse token/Phone Number ID — confira se copiou certo e se o token tem permissão de mensagens."
+          : "Não foi possível salvar. Tente novamente.",
+      );
     } finally {
       setSaving(false);
     }
@@ -215,6 +94,7 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         placeholder="Novo Phone Number ID (opcional)"
         className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
       />
+      {error && <p className="text-[11px] text-red-600">{error}</p>}
       <div className="flex items-center justify-end gap-2">
         {saved && <span className="text-xs text-green-600">Salvo!</span>}
         <button type="button" onClick={onClose} className="px-2 py-1 text-xs text-gray-500 hover:underline">
@@ -241,7 +121,6 @@ export function ConnectWhatsappPage() {
   const [cloudAccessToken, setCloudAccessToken] = useState("");
   const [cloudAppSecret, setCloudAppSecret] = useState("");
   const [creating, setCreating] = useState(false);
-  const [linkGeneratorFor, setLinkGeneratorFor] = useState<string | null>(null);
   const [credentialsFormFor, setCredentialsFormFor] = useState<string | null>(null);
   const [confirmDeleteFor, setConfirmDeleteFor] = useState<string | null>(null);
   const [cloudWebhookInfo, setCloudWebhookInfo] = useState<{ url: string; verifyToken: string } | null>(null);
@@ -497,20 +376,13 @@ export function ConnectWhatsappPage() {
               <button onClick={() => handleLogout(session.id)} className="text-xs font-medium text-red-600 hover:underline">
                 Desconectar
               </button>
-              {session.phoneNumber ? (
-                <button
-                  onClick={() => setLinkGeneratorFor((v) => (v === session.id ? null : session.id))}
-                  className="text-xs font-medium text-brand-dark hover:underline"
-                >
-                  🔗 Links personalizados
-                </button>
-              ) : (
+              {!session.phoneNumber && (
                 session.provider === "CLOUD_API" && (
                   <button
                     onClick={() => handleRefreshPhoneNumber(session.id)}
                     className="text-xs font-medium text-brand-dark hover:underline"
                   >
-                    🔄 Buscar número (para gerar links)
+                    🔄 Buscar número
                   </button>
                 )
               )}
@@ -543,9 +415,6 @@ export function ConnectWhatsappPage() {
                 </button>
               )}
             </div>
-            {session.phoneNumber && linkGeneratorFor === session.id && (
-              <WaLinkGenerator sessionId={session.id} phoneNumber={session.phoneNumber} />
-            )}
             {credentialsFormFor === session.id && (
               <CloudApiCredentialsForm sessionId={session.id} onClose={() => setCredentialsFormFor(null)} />
             )}

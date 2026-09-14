@@ -13,6 +13,7 @@ import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
 import { AutoRepliesPage } from "./pages/AutoRepliesPage";
 import { TeamPage } from "./pages/TeamPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { LinksPage } from "./pages/LinksPage";
 
 export function App() {
   return (
@@ -42,6 +43,7 @@ export function App() {
               <Route path="/equipe" element={<TeamPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />
             </Route>
+            <Route path="/links" element={<LinksPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/inbox" replace />} />

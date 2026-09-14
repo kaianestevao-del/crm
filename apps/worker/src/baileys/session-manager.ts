@@ -526,7 +526,9 @@ async function recordMessage(
     msg.message.extendedTextMessage?.text ??
     msg.message.imageMessage?.caption ??
     msg.message.videoMessage?.caption ??
-    "";
+    (type === MessageType.CONTACT ? formatBaileysContactsText(msg.message) : undefined) ??
+    (type === MessageType.LOCATION ? formatBaileysLocationText(msg.message) : undefined) ??
+    (type === MessageType.UNKNOWN ? "Mensagem não suportada" : "");
 
   await upsertContactAndRecordMessage(
     sessionId,
@@ -605,7 +607,31 @@ function detectMessageType(msg: proto.IWebMessageInfo): MessageType {
   if (m.videoMessage) return MessageType.VIDEO;
   if (m.documentMessage) return MessageType.DOCUMENT;
   if (m.stickerMessage) return MessageType.STICKER;
+  if (m.contactMessage || m.contactsArrayMessage) return MessageType.CONTACT;
+  if (m.locationMessage) return MessageType.LOCATION;
   return MessageType.UNKNOWN;
+}
+
+// Baileys hands over the raw vCard text rather than parsed fields — pull just the display
+// name and first phone number out of it, in the same "Name|phone" shape the Cloud API path
+// produces, so the frontend can render/parse both providers identically.
+function formatBaileysContactsText(m: proto.IMessage): string {
+  const single = m.contactMessage ? [m.contactMessage] : m.contactsArrayMessage?.contacts ?? [];
+  return single
+    .map((c) => {
+      const name = c.displayName ?? "Contato sem nome";
+      const phoneMatch = c.vcard?.match(/waid=(\d+)/) ?? c.vcard?.match(/TEL[^:]*:([+\d]+)/);
+      const phone = phoneMatch?.[1]?.replace(/\D/g, "");
+      return phone ? `${name}|${phone}` : name;
+    })
+    .join("\n");
+}
+
+function formatBaileysLocationText(m: proto.IMessage): string {
+  const loc = m.locationMessage;
+  if (!loc) return "";
+  const label = loc.name || loc.address || "";
+  return [label, `${loc.degreesLatitude},${loc.degreesLongitude}`].filter(Boolean).join("\n");
 }
 
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -788,9 +814,39 @@ function detectCloudMessageType(type: string): MessageType {
       return MessageType.AUDIO;
     case "document":
       return MessageType.DOCUMENT;
-    default:
+    case "contacts":
+      return MessageType.CONTACT;
+    case "location":
+      return MessageType.LOCATION;
+    case "sticker":
+      return MessageType.STICKER;
+    case "text":
       return MessageType.TEXT;
+    default:
+      // reaction/button/interactive/order/system/etc. — no renderer for these yet, but at
+      // least the message shows up (as "Mensagem não suportada") instead of vanishing.
+      return MessageType.UNKNOWN;
   }
+}
+
+// A shared-contact message carries no "text.body" — this builds a readable fallback (and the
+// structured bit the frontend needs to offer "start a conversation with this person") from
+// whichever of the one or more vcards Meta sent.
+function formatCloudContactsText(contacts: CloudApiMessage["contacts"]): string {
+  if (!contacts?.length) return "";
+  return contacts
+    .map((c) => {
+      const name = c.name?.formatted_name ?? "Contato sem nome";
+      const phone = c.phones?.[0]?.wa_id ?? c.phones?.[0]?.phone ?? "";
+      return phone ? `${name}|${phone}` : name;
+    })
+    .join("\n");
+}
+
+function formatCloudLocationText(location: CloudApiMessage["location"]): string {
+  if (!location) return "";
+  const label = location.name || location.address || "";
+  return [label, `${location.latitude},${location.longitude}`].filter(Boolean).join("\n");
 }
 
 async function downloadCloudApiMedia(
@@ -835,6 +891,11 @@ interface CloudApiMessage {
   video?: { id: string; caption?: string; mime_type?: string };
   audio?: { id: string; mime_type?: string };
   document?: { id: string; filename?: string; caption?: string; mime_type?: string };
+  contacts?: {
+    name?: { formatted_name?: string };
+    phones?: { phone?: string; wa_id?: string }[];
+  }[];
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
 }
 
 interface CloudApiStatus {
@@ -884,7 +945,14 @@ export async function processInboundCloudMessage(job: InboundCloudMessageJob) {
 
   for (const m of value.messages) {
     const type = detectCloudMessageType(m.type);
-    const text = m.text?.body ?? m.image?.caption ?? m.video?.caption ?? m.document?.caption ?? "";
+    const text =
+      m.text?.body ??
+      m.image?.caption ??
+      m.video?.caption ??
+      m.document?.caption ??
+      (type === MessageType.CONTACT ? formatCloudContactsText(m.contacts) : undefined) ??
+      (type === MessageType.LOCATION ? formatCloudLocationText(m.location) : undefined) ??
+      (type === MessageType.UNKNOWN ? "Mensagem não suportada" : "");
     const mediaRef = m.image ?? m.video ?? m.audio ?? m.document;
 
     await upsertContactAndRecordMessage(

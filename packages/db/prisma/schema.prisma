@@ -32,6 +32,8 @@ enum MessageType {
   VIDEO
   DOCUMENT
   STICKER
+  CONTACT
+  LOCATION
   UNKNOWN
 }
 

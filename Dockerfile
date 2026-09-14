@@ -4,7 +4,8 @@ FROM node:20-bookworm-slim
 # (msgpackr-extract, protobufjs) during `pnpm install`. openssl is required by
 # Prisma's query engine binary — Alpine/musl was tried first and hit missing
 # libssl.so.1.1, so this uses a Debian base instead.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
+# postgresql-client provides pg_dump, used by the worker's daily database backup.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

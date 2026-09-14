@@ -124,12 +124,26 @@ export async function updateCloudApiCredentials(req: Request, res: Response) {
     throw new HttpError(400, "nothing_to_update");
   }
 
+  // A pasted token/phone-number-id gets saved straight through with no check against Meta — the
+  // exact way the last "fix" of this connection went out still broken (saved fine, sends kept
+  // failing). Re-run the same Graph API check createSession does before persisting anything.
+  let phoneNumber = session.phoneNumber;
+  if (input.cloudApiAccessToken || input.cloudApiPhoneNumberId) {
+    const effectiveAccessToken = input.cloudApiAccessToken ?? session.cloudApiAccessToken;
+    const effectivePhoneNumberId = input.cloudApiPhoneNumberId ?? session.cloudApiPhoneNumberId;
+    if (!effectiveAccessToken || !effectivePhoneNumberId) throw new HttpError(400, "cloud_api_credentials_required");
+    const fetched = await fetchCloudApiPhoneNumber(effectivePhoneNumberId, effectiveAccessToken).catch(() => null);
+    if (!fetched) throw new HttpError(400, "cloud_api_credentials_invalid");
+    phoneNumber = fetched;
+  }
+
   const updated = await prisma.whatsappSession.update({
     where: { id: session.id },
     data: {
       cloudApiAccessToken: input.cloudApiAccessToken,
       cloudApiAppSecret: input.cloudApiAppSecret,
       cloudApiPhoneNumberId: input.cloudApiPhoneNumberId,
+      phoneNumber,
     },
   });
   res.json(toSessionResponse(updated));

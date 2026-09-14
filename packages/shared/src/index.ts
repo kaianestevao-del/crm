@@ -108,6 +108,8 @@ export enum MessageType {
   VIDEO = "VIDEO",
   DOCUMENT = "DOCUMENT",
   STICKER = "STICKER",
+  CONTACT = "CONTACT",
+  LOCATION = "LOCATION",
   UNKNOWN = "UNKNOWN",
 }
 
@@ -210,6 +212,10 @@ export const QUEUE_SCHEDULED_MESSAGES = "scheduled-messages";
 export interface ScheduledMessageJob {
   scheduledMessageId: string;
 }
+
+// Fires on a cron schedule (see daily-backup-worker.ts) — no payload needed, the processor
+// always dumps the whole database fresh.
+export const QUEUE_DAILY_BACKUP = "daily-backup";
 
 export interface JwtPayload {
   sub: string; // userId
