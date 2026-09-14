@@ -17,6 +17,25 @@ function buildWaLink(phoneNumber: string, message: string) {
   return `https://wa.me/${phoneNumber}${message.trim() ? `?text=${encodeURIComponent(message.trim())}` : ""}`;
 }
 
+// A conexão Cloud API nem sempre traz o número preenchido automaticamente (depende de uma busca
+// na Meta que pode falhar por permissão do token). Em vez de travar a geração de link nisso, o
+// número fica configurável aqui manualmente e salvo neste navegador — independe do backend.
+function loadPhoneOverride(sessionId: string): string {
+  try {
+    return localStorage.getItem(`wa-link-phone:${sessionId}`) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function savePhoneOverride(sessionId: string, phoneNumber: string) {
+  try {
+    localStorage.setItem(`wa-link-phone:${sessionId}`, phoneNumber);
+  } catch {
+    // Storage unavailable — o número só não persiste entre recarregamentos.
+  }
+}
+
 // Saved locally in the browser (no backend/DB involved) — one list of link presets per
 // WhatsApp connection, so a person setting up multiple links (bio, ads, etc.) doesn't have to
 // retype the message every time. Lives only on this device/browser.
@@ -60,10 +79,17 @@ function CopyLinkButton({ link }: { link: string }) {
   );
 }
 
-function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneNumber: string }) {
+function WaLinkGenerator({ sessionId, defaultPhoneNumber }: { sessionId: string; defaultPhoneNumber: string }) {
   const [links, setLinks] = useState<CustomLink[]>(() => loadSavedLinks(sessionId));
+  const [phoneNumber, setPhoneNumber] = useState(() => loadPhoneOverride(sessionId) || defaultPhoneNumber);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
+
+  function handlePhoneChange(value: string) {
+    const digits = value.replace(/\D/g, "");
+    setPhoneNumber(digits);
+    savePhoneOverride(sessionId, digits);
+  }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -83,6 +109,20 @@ function WaLinkGenerator({ sessionId, phoneNumber }: { sessionId: string; phoneN
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mb-4 space-y-1">
+        <label className="text-xs font-medium text-gray-500">Número usado nos links</label>
+        <div className="flex items-center overflow-hidden rounded-xl border border-gray-300 focus-within:border-brand">
+          <span className="border-r border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500">+</span>
+          <input
+            value={phoneNumber}
+            onChange={(e) => handlePhoneChange(e.target.value)}
+            placeholder="Ex: 5571966630936"
+            className="w-full px-3 py-2 text-sm focus:outline-none"
+          />
+        </div>
+        <p className="text-xs text-gray-400">DDI + DDD + número, só dígitos. Confirme/ajuste aqui se vier errado.</p>
+      </div>
+
       <form onSubmit={handleCreate} className="mb-4 space-y-2">
         <input
           value={name}
@@ -198,7 +238,7 @@ export function LinksPage() {
 
   useEffect(() => {
     api.get("/whatsapp-sessions").then((res) => {
-      const connected = (res.data as WhatsappSession[]).find((s) => s.phoneNumber);
+      const connected = (res.data as WhatsappSession[]).find((s) => s.status === "CONNECTED");
       setSession(connected ?? null);
     });
   }, []);
@@ -215,7 +255,7 @@ export function LinksPage() {
         <section>
           <h2 className="mb-2 text-sm font-semibold text-gray-800">🔗 Criar link com mensagem</h2>
           {session ? (
-            <WaLinkGenerator sessionId={session.id} phoneNumber={session.phoneNumber!} />
+            <WaLinkGenerator sessionId={session.id} defaultPhoneNumber={session.phoneNumber ?? ""} />
           ) : (
             <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
               Conecte um número em "Conexão WhatsApp" para gerar links.
