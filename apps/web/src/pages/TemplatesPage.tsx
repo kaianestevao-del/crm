@@ -239,7 +239,7 @@ export function TemplatesPage() {
                     Enviar para aprovação da Meta
                   </button>
                 )}
-                {t.status === "PENDING" && (
+                {(t.status === "PENDING" || (t.status === "REJECTED" && !t.rejectionReason)) && (
                   <button onClick={() => syncStatus(t.id)} disabled={busyId === t.id} className="text-xs font-medium text-gray-500 hover:underline">
                     Atualizar status
                   </button>
