@@ -135,9 +135,14 @@ export async function submitTemplate(req: Request, res: Response) {
       ],
     }),
   });
-  const data = (await res_.json()) as { id?: string; status?: string; error?: { message?: string } };
+  const data = (await res_.json()) as {
+    id?: string;
+    status?: string;
+    error?: { message?: string; error_user_msg?: string; error_data?: { details?: string } };
+  };
   if (!res_.ok || !data.id) {
-    throw new HttpError(400, `meta_template_submit_failed:${data.error?.message ?? JSON.stringify(data)}`);
+    const detail = data.error?.error_user_msg ?? data.error?.error_data?.details ?? data.error?.message ?? JSON.stringify(data);
+    throw new HttpError(400, `meta_template_submit_failed:${detail}`);
   }
 
   const updated = await prisma.messageTemplate.update({
