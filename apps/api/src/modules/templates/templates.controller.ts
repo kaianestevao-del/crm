@@ -78,6 +78,36 @@ async function getOwnedTemplate(organizationId: string, id: string) {
   return template;
 }
 
+// Only DRAFT/REJECTED templates can be edited in place — once submitted (PENDING/APPROVED),
+// Meta owns that name/version, so changing it here would just diverge from what Meta has.
+export async function updateTemplate(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const template = await getOwnedTemplate(organizationId, req.params.id);
+  if (template.status !== "DRAFT" && template.status !== "REJECTED") {
+    throw new HttpError(400, "template_not_editable");
+  }
+  const input = createSchema.parse(req.body);
+  const variableCount = countVariables(input.bodyText);
+  if (input.bodyExamples.length !== variableCount) {
+    throw new HttpError(400, "body_examples_count_mismatch");
+  }
+
+  const updated = await prisma.messageTemplate.update({
+    where: { id: template.id },
+    data: {
+      name: input.name,
+      category: input.category,
+      language: input.language,
+      bodyText: input.bodyText,
+      variableCount,
+      bodyExamples: input.bodyExamples,
+      // Editing a rejected template clears the old reason — it no longer describes the new content.
+      rejectionReason: null,
+    },
+  });
+  res.json(updated);
+}
+
 // Sends the template to Meta for review. Meta's own create-template response already includes
 // a status (usually PENDING, sometimes APPROVED instantly for simple templates), so that's used
 // directly instead of always assuming PENDING.

@@ -11,6 +11,7 @@ interface Template {
   category: TemplateCategory;
   language: string;
   bodyText: string;
+  bodyExamples: string[];
   variableCount: number;
   status: TemplateStatus;
   rejectionReason: string | null;
@@ -39,11 +40,28 @@ function insertVariable(text: string, textarea: HTMLTextAreaElement | null, next
   return `${text.slice(0, start)}${tag}${text.slice(end)}`;
 }
 
-function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState<TemplateCategory>("UTILITY");
-  const [bodyText, setBodyText] = useState("");
-  const [examples, setExamples] = useState<string[]>([]);
+interface TemplateFormInitial {
+  name: string;
+  category: TemplateCategory;
+  bodyText: string;
+  bodyExamples: string[];
+}
+
+function TemplateForm({
+  editingId,
+  initial,
+  onSaved,
+  onCancel,
+}: {
+  editingId?: string;
+  initial?: TemplateFormInitial;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [category, setCategory] = useState<TemplateCategory>(initial?.category ?? "UTILITY");
+  const [bodyText, setBodyText] = useState(initial?.bodyText ?? "");
+  const [examples, setExamples] = useState<string[]>(initial?.bodyExamples ?? []);
   const [textarea, setTextarea] = useState<HTMLTextAreaElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +84,13 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
     setSaving(true);
     setError(null);
     try {
-      await api.post("/templates", { name: name.trim(), category, bodyText: bodyText.trim(), bodyExamples: trimmedExamples });
-      onCreated();
+      const payload = { name: name.trim(), category, bodyText: bodyText.trim(), bodyExamples: trimmedExamples };
+      if (editingId) {
+        await api.patch(`/templates/${editingId}`, payload);
+      } else {
+        await api.post("/templates", payload);
+      }
+      onSaved();
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(
@@ -75,7 +98,7 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
           ? "O nome só pode ter letras minúsculas, números e underline (_)."
           : message === "body_examples_count_mismatch"
             ? "Preencha um valor de exemplo para cada variável."
-            : "Não foi possível criar o template.",
+            : `Não foi possível ${editingId ? "salvar" : "criar"} o template.`,
       );
     } finally {
       setSaving(false);
@@ -167,16 +190,18 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
           }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
-          {saving ? "Salvando..." : "Salvar rascunho"}
+          {saving ? "Salvando..." : editingId ? "Salvar alterações" : "Salvar rascunho"}
         </button>
       </div>
     </form>
   );
 }
 
+type FormMode = { type: "create" } | { type: "edit"; template: Template } | { type: "duplicate"; template: Template };
+
 export function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [showForm, setShowForm] = useState(false);
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -240,20 +265,41 @@ export function TemplatesPage() {
           <h1 className="text-lg font-semibold text-gray-900">Templates</h1>
           <p className="text-sm text-gray-500">Modelos de mensagem aprovados pela Meta, usados nas Campanhas.</p>
         </div>
-        {!showForm && (
-          <button onClick={() => setShowForm(true)} className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+        {!formMode && (
+          <button
+            onClick={() => setFormMode({ type: "create" })}
+            className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
             + Novo template
           </button>
         )}
       </div>
 
-      {showForm && (
-        <CreateTemplateForm
-          onCreated={() => {
-            setShowForm(false);
+      {formMode && (
+        <TemplateForm
+          editingId={formMode.type === "edit" ? formMode.template.id : undefined}
+          initial={
+            formMode.type === "edit"
+              ? {
+                  name: formMode.template.name,
+                  category: formMode.template.category,
+                  bodyText: formMode.template.bodyText,
+                  bodyExamples: formMode.template.bodyExamples,
+                }
+              : formMode.type === "duplicate"
+                ? {
+                    name: `${formMode.template.name}_copia`,
+                    category: formMode.template.category,
+                    bodyText: formMode.template.bodyText,
+                    bodyExamples: formMode.template.bodyExamples,
+                  }
+                : undefined
+          }
+          onSaved={() => {
+            setFormMode(null);
             refresh();
           }}
-          onCancel={() => setShowForm(false)}
+          onCancel={() => setFormMode(null)}
         />
       )}
 
@@ -281,6 +327,20 @@ export function TemplatesPage() {
                     Atualizar status
                   </button>
                 )}
+                {(t.status === "DRAFT" || t.status === "REJECTED") && (
+                  <button
+                    onClick={() => setFormMode({ type: "edit", template: t })}
+                    className="text-xs font-medium text-gray-500 hover:underline"
+                  >
+                    Editar
+                  </button>
+                )}
+                <button
+                  onClick={() => setFormMode({ type: "duplicate", template: t })}
+                  className="text-xs font-medium text-gray-500 hover:underline"
+                >
+                  Duplicar
+                </button>
                 {confirmDeleteId === t.id ? (
                   <span className="flex items-center gap-1 text-xs">
                     <span className="text-gray-500">Apagar?</span>
@@ -305,7 +365,7 @@ export function TemplatesPage() {
             {actionError?.id === t.id && <p className="mt-1 text-xs text-red-600">{actionError.message}</p>}
           </div>
         ))}
-        {templates.length === 0 && !showForm && <p className="text-sm text-gray-400">Nenhum template criado ainda.</p>}
+        {templates.length === 0 && !formMode && <p className="text-sm text-gray-400">Nenhum template criado ainda.</p>}
       </div>
     </div>
   );
