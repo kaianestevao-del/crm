@@ -14,6 +14,7 @@ import { createTranscribeAudioWorker } from "./queues/transcribe-audio-worker";
 import { createLabelCommandsWorker } from "./queues/label-commands-worker";
 import { createScheduledMessagesWorker } from "./queues/scheduled-messages-worker";
 import { createInboundCloudMessagesWorker } from "./queues/inbound-cloud-messages-worker";
+import { createCampaignDispatchWorker } from "./queues/campaign-dispatch-worker";
 import { createDailyBackupWorker, scheduleDailyBackup } from "./backup/daily-backup-worker";
 
 async function main() {
@@ -23,6 +24,7 @@ async function main() {
   createLabelCommandsWorker();
   createScheduledMessagesWorker();
   createInboundCloudMessagesWorker();
+  createCampaignDispatchWorker();
   createDailyBackupWorker();
   await scheduleDailyBackup();
 

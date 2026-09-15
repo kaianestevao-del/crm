@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 
-type CampaignStatus = "DRAFT" | "SENDING" | "DONE" | "FAILED";
+type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "DONE" | "FAILED";
+type AudienceType = "ALL" | "TAG" | "LABEL" | "CONTACTS";
 
 interface Template {
   id: string;
@@ -21,11 +22,18 @@ interface WhatsappLabel {
   name: string;
 }
 
+interface Contact {
+  id: string;
+  name: string | null;
+  phoneNumber: string;
+}
+
 interface CampaignListItem {
   id: string;
   name: string;
   status: CampaignStatus;
   estimatedCost: string | number | null;
+  scheduledFor: string | null;
   createdAt: string;
   template: { name: string; category: string };
   _count: { recipients: number };
@@ -39,6 +47,7 @@ interface CampaignDetail extends CampaignListItem {
 
 const STATUS_LABEL: Record<CampaignStatus, string> = {
   DRAFT: "Rascunho",
+  SCHEDULED: "Agendada",
   SENDING: "Enviando",
   DONE: "Concluída",
   FAILED: "Falhou",
@@ -46,6 +55,7 @@ const STATUS_LABEL: Record<CampaignStatus, string> = {
 
 const STATUS_STYLE: Record<CampaignStatus, string> = {
   DRAFT: "bg-gray-100 text-gray-600",
+  SCHEDULED: "bg-blue-100 text-blue-700",
   SENDING: "bg-yellow-100 text-yellow-700",
   DONE: "bg-green-100 text-green-700",
   FAILED: "bg-red-100 text-red-700",
@@ -56,28 +66,84 @@ function money(v: string | number | null) {
   return Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function ContactPicker({ contacts, selectedIds, onChange }: { contacts: Contact[]; selectedIds: string[]; onChange: (ids: string[]) => void }) {
+  const [search, setSearch] = useState("");
+  const term = search.trim().toLowerCase();
+  const filtered = term
+    ? contacts.filter((c) => (c.name ?? "").toLowerCase().includes(term) || c.phoneNumber.includes(term))
+    : contacts;
+
+  function toggle(id: string) {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  }
+
+  const selectedContacts = contacts.filter((c) => selectedIds.includes(c.id));
+
+  return (
+    <div className="mt-2 space-y-2">
+      {selectedContacts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedContacts.map((c) => (
+            <span key={c.id} className="flex items-center gap-1 rounded-full bg-brand-dark/10 px-2.5 py-1 text-xs font-medium text-brand-dark">
+              {c.name || c.phoneNumber}
+              <button type="button" onClick={() => toggle(c.id)} className="text-brand-dark/60 hover:text-brand-dark">
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Pesquisar por nome ou telefone..."
+        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+      />
+      <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-200">
+        {filtered.slice(0, 50).map((c) => (
+          <label key={c.id} className="flex cursor-pointer items-center gap-2 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 hover:bg-gray-50">
+            <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggle(c.id)} />
+            <span className="text-gray-700">{c.name || "(sem nome)"}</span>
+            <span className="text-xs text-gray-400">{c.phoneNumber}</span>
+          </label>
+        ))}
+        {filtered.length === 0 && <p className="p-3 text-xs text-gray-400">Nenhum contato encontrado.</p>}
+      </div>
+    </div>
+  );
+}
+
 function NewCampaignWizard({
   templates,
   tags,
   labels,
+  contacts,
   onDone,
   onCancel,
 }: {
   templates: Template[];
   tags: Tag[];
   labels: WhatsappLabel[];
+  contacts: Contact[];
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState("");
-  const [audienceType, setAudienceType] = useState<"TAG" | "LABEL" | "ALL">("ALL");
+  const [audienceType, setAudienceType] = useState<AudienceType>("ALL");
   const [audienceTagId, setAudienceTagId] = useState("");
   const [audienceLabelId, setAudienceLabelId] = useState("");
+  const [audienceContactIds, setAudienceContactIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; recipientCount: number; previewCost: number } | null>(null);
   const [sending, setSending] = useState(false);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduledFor, setScheduledFor] = useState("");
 
   const approvedTemplates = templates.filter((t) => t.status === "APPROVED");
 
@@ -86,6 +152,7 @@ function NewCampaignWizard({
     if (!name.trim() || !templateId) return;
     if (audienceType === "TAG" && !audienceTagId) return;
     if (audienceType === "LABEL" && !audienceLabelId) return;
+    if (audienceType === "CONTACTS" && audienceContactIds.length === 0) return;
     setCreating(true);
     setError(null);
     try {
@@ -95,6 +162,7 @@ function NewCampaignWizard({
         audienceType,
         audienceTagId: audienceType === "TAG" ? audienceTagId : undefined,
         audienceLabelId: audienceType === "LABEL" ? audienceLabelId : undefined,
+        audienceContactIds: audienceType === "CONTACTS" ? audienceContactIds : undefined,
       });
       setPreview({ id: res.data.id, recipientCount: res.data.recipientCount, previewCost: res.data.previewCost });
     } catch (err: unknown) {
@@ -111,10 +179,17 @@ function NewCampaignWizard({
 
   async function confirmSend() {
     if (!preview) return;
+    if (scheduleEnabled && !scheduledFor) return;
     setSending(true);
+    setError(null);
     try {
-      await api.post(`/campaigns/${preview.id}/send`);
+      await api.post(`/campaigns/${preview.id}/send`, {
+        scheduledFor: scheduleEnabled ? new Date(scheduledFor).toISOString() : undefined,
+      });
       onDone();
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(message === "scheduled_for_must_be_in_the_future" ? "Escolha uma data/hora no futuro." : "Não foi possível disparar.");
     } finally {
       setSending(false);
     }
@@ -128,16 +203,34 @@ function NewCampaignWizard({
           <strong>{preview.recipientCount}</strong> destinatário{preview.recipientCount === 1 ? "" : "s"} × custo estimado por
           mensagem = <strong>{money(preview.previewCost)}</strong> (estimativa, pode variar do valor real cobrado pela Meta).
         </p>
+
+        <div className="mt-3">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} />
+            Agendar para uma data/hora específica (em vez de disparar agora)
+          </label>
+          {scheduleEnabled && (
+            <input
+              type="datetime-local"
+              value={scheduledFor}
+              onChange={(e) => setScheduledFor(e.target.value)}
+              className="mt-2 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            />
+          )}
+        </div>
+
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onCancel} className="rounded-xl border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
             Cancelar
           </button>
           <button
             onClick={confirmSend}
-            disabled={sending}
+            disabled={sending || (scheduleEnabled && !scheduledFor)}
             className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
-            {sending ? "Disparando..." : "Confirmar e disparar"}
+            {sending ? "Enviando..." : scheduleEnabled ? "Agendar disparo" : "Confirmar e disparar"}
           </button>
         </div>
       </div>
@@ -177,8 +270,8 @@ function NewCampaignWizard({
 
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-500">Público</label>
-        <div className="flex gap-2">
-          {(["ALL", "TAG", "LABEL"] as const).map((v) => (
+        <div className="flex flex-wrap gap-2">
+          {(["ALL", "TAG", "LABEL", "CONTACTS"] as const).map((v) => (
             <button
               key={v}
               type="button"
@@ -187,7 +280,7 @@ function NewCampaignWizard({
                 audienceType === v ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
               }`}
             >
-              {v === "ALL" ? "Todos os contatos" : v === "TAG" ? "Por Aba" : "Por Etiqueta"}
+              {v === "ALL" ? "Todos os contatos" : v === "TAG" ? "Por Aba" : v === "LABEL" ? "Por Etiqueta" : "Contatos específicos"}
             </button>
           ))}
         </div>
@@ -219,6 +312,9 @@ function NewCampaignWizard({
             ))}
           </select>
         )}
+        {audienceType === "CONTACTS" && (
+          <ContactPicker contacts={contacts} selectedIds={audienceContactIds} onChange={setAudienceContactIds} />
+        )}
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -229,7 +325,12 @@ function NewCampaignWizard({
         </button>
         <button
           type="submit"
-          disabled={creating || !name.trim() || !templateId}
+          disabled={
+            creating ||
+            !name.trim() ||
+            !templateId ||
+            (audienceType === "CONTACTS" && audienceContactIds.length === 0)
+          }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {creating ? "Calculando..." : "Avançar"}
@@ -239,8 +340,9 @@ function NewCampaignWizard({
   );
 }
 
-function CampaignDetails({ id }: { id: string }) {
+function CampaignDetails({ id, onCancelled }: { id: string; onCancelled: () => void }) {
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   async function refresh() {
     const res = await api.get(`/campaigns/${id}`);
@@ -262,6 +364,34 @@ function CampaignDetails({ id }: { id: string }) {
   }, [id]);
 
   if (!detail) return <p className="p-3 text-xs text-gray-400">Carregando...</p>;
+
+  async function cancelSchedule() {
+    setCancelling(true);
+    try {
+      await api.post(`/campaigns/${id}/cancel-schedule`);
+      onCancelled();
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  if (detail.status === "SCHEDULED") {
+    return (
+      <div className="border-t border-gray-100 bg-gray-50 p-4 text-sm">
+        <p className="text-gray-700">
+          Agendada para <strong>{detail.scheduledFor ? formatDateTime(detail.scheduledFor) : "—"}</strong> ·{" "}
+          {detail.recipientCount} destinatários · custo estimado {money(detail.estimatedCost)}
+        </p>
+        <button
+          onClick={cancelSchedule}
+          disabled={cancelling}
+          className="mt-2 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+        >
+          {cancelling ? "Cancelando..." : "Cancelar agendamento"}
+        </button>
+      </div>
+    );
+  }
 
   const sent = detail.recipientStatusCounts.SENT ?? 0;
   const failed = detail.recipientStatusCounts.FAILED ?? 0;
@@ -310,6 +440,7 @@ export function CampaignsPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [labels, setLabels] = useState<WhatsappLabel[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [showWizard, setShowWizard] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -323,6 +454,7 @@ export function CampaignsPage() {
     api.get("/templates").then((res) => setTemplates(res.data));
     api.get("/tags").then((res) => setTags(res.data));
     api.get("/whatsapp-labels").then((res) => setLabels(res.data));
+    api.get("/contacts").then((res) => setContacts(res.data));
   }, []);
 
   useEffect(() => {
@@ -340,7 +472,7 @@ export function CampaignsPage() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Campanhas</h1>
-          <p className="text-sm text-gray-500">Disparo em massa via Templates aprovados pela Meta.</p>
+          <p className="text-sm text-gray-500">Disparo via Templates aprovados pela Meta — em massa ou pra contatos específicos.</p>
         </div>
         {!showWizard && (
           <button onClick={() => setShowWizard(true)} className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90">
@@ -354,6 +486,7 @@ export function CampaignsPage() {
           templates={templates}
           tags={tags}
           labels={labels}
+          contacts={contacts}
           onDone={() => {
             setShowWizard(false);
             refreshCampaigns();
@@ -373,10 +506,13 @@ export function CampaignsPage() {
                 <span className="text-sm font-medium text-gray-900">{c.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{c.template.name}</span>
+                {c.status === "SCHEDULED" && c.scheduledFor && (
+                  <span className="text-xs text-blue-600">{formatDateTime(c.scheduledFor)}</span>
+                )}
               </div>
               <span className="text-xs text-gray-400">{c._count.recipients} destinatários</span>
             </button>
-            {expandedId === c.id && <CampaignDetails id={c.id} />}
+            {expandedId === c.id && <CampaignDetails id={c.id} onCancelled={refreshCampaigns} />}
           </div>
         ))}
         {campaigns.length === 0 && !showWizard && <p className="text-sm text-gray-400">Nenhuma campanha criada ainda.</p>}

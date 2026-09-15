@@ -224,8 +224,7 @@ export type LabelCommandJob =
   | { action: "remove"; sessionId: string; waJid: string; waLabelId: string }
   | { action: "create"; sessionId: string; name: string; color?: number };
 
-// A single scheduled message tied to one conversation (never a bulk/broadcast send — this
-// product deliberately has no mass-campaign feature). The API enqueues this as a delayed
+// A single scheduled message tied to one conversation. The API enqueues this as a delayed
 // BullMQ job (jobId = the ScheduledMessage row's id, so it can be cancelled by removing the
 // job); the worker looks the row up by id when the delay elapses and sends it then.
 export const QUEUE_SCHEDULED_MESSAGES = "scheduled-messages";
@@ -237,6 +236,16 @@ export interface ScheduledMessageJob {
 // Fires on a cron schedule (see daily-backup-worker.ts) — no payload needed, the processor
 // always dumps the whole database fresh.
 export const QUEUE_DAILY_BACKUP = "daily-backup";
+
+// Same delayed-job pattern as QUEUE_SCHEDULED_MESSAGES (jobId = Campaign id, so a scheduled
+// send can be cancelled with queue.remove(campaignId)) — but for the whole per-recipient
+// dispatch loop instead of one message. An immediate send just uses delay: 0, so both the
+// "send now" and "send later" paths in sendCampaign share this one code path in the worker.
+export const QUEUE_CAMPAIGN_DISPATCH = "campaign-dispatch";
+
+export interface CampaignDispatchJob {
+  campaignId: string;
+}
 
 export interface JwtPayload {
   sub: string; // userId

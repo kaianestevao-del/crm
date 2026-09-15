@@ -73,10 +73,12 @@ enum CampaignAudienceType {
   TAG
   LABEL
   ALL
+  CONTACTS
 }
 
 enum CampaignStatus {
   DRAFT
+  SCHEDULED
   SENDING
   DONE
   FAILED
@@ -630,13 +632,19 @@ model Campaign {
   name          String
   status        CampaignStatus @default(DRAFT)
   audienceType  CampaignAudienceType
-  // Exactly one of these two is set, matching audienceType (TAG/LABEL); both null for ALL.
-  audienceTagId   String?
-  audienceLabelId String?
+  // Exactly one of these is set, matching audienceType; all empty/null for ALL.
+  audienceTagId    String?
+  audienceLabelId  String?
+  audienceContactIds String[] @default([])
   // Locked in at send time (recipientCount × the org's price-per-message at that moment), so
   // editing the price table later doesn't retroactively change what a past campaign "cost".
   estimatedCost Decimal?
   createdAt     DateTime  @default(now())
+  // Set only when the send was scheduled for later rather than fired immediately — the
+  // campaign sits at status SCHEDULED until the delayed dispatch job fires (see
+  // QUEUE_CAMPAIGN_DISPATCH), same "delayed BullMQ job, jobId = row id" pattern as
+  // ScheduledMessage, so it can be cancelled the same way.
+  scheduledFor  DateTime?
   startedAt     DateTime?
   finishedAt    DateTime?
 
