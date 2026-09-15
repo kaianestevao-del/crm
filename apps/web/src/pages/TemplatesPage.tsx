@@ -43,26 +43,39 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
   const [name, setName] = useState("");
   const [category, setCategory] = useState<TemplateCategory>("UTILITY");
   const [bodyText, setBodyText] = useState("");
+  const [examples, setExamples] = useState<string[]>([]);
   const [textarea, setTextarea] = useState<HTMLTextAreaElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const variableCount = new Set(Array.from(bodyText.matchAll(/\{\{(\d+)\}\}/g)).map((m) => m[1])).size;
 
+  function updateExample(index: number, value: string) {
+    setExamples((prev) => {
+      const next = [...prev];
+      while (next.length < variableCount) next.push("");
+      next[index] = value;
+      return next;
+    });
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !bodyText.trim()) return;
+    const trimmedExamples = examples.slice(0, variableCount).map((v) => v.trim());
+    if (!name.trim() || !bodyText.trim() || trimmedExamples.some((v) => !v) || trimmedExamples.length !== variableCount) return;
     setSaving(true);
     setError(null);
     try {
-      await api.post("/templates", { name: name.trim(), category, bodyText: bodyText.trim() });
+      await api.post("/templates", { name: name.trim(), category, bodyText: bodyText.trim(), bodyExamples: trimmedExamples });
       onCreated();
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(
         message === "name_must_be_lowercase_underscore"
           ? "O nome só pode ter letras minúsculas, números e underline (_)."
-          : "Não foi possível criar o template.",
+          : message === "body_examples_count_mismatch"
+            ? "Preencha um valor de exemplo para cada variável."
+            : "Não foi possível criar o template.",
       );
     } finally {
       setSaving(false);
@@ -119,6 +132,25 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
         </p>
       </div>
 
+      {variableCount > 0 && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-500">
+            Valores de exemplo (a Meta exige um exemplo real por variável para aprovar)
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {Array.from({ length: variableCount }).map((_, i) => (
+              <input
+                key={i}
+                value={examples[i] ?? ""}
+                onChange={(e) => updateExample(i, e.target.value)}
+                placeholder={`Exemplo para {{${i + 1}}}`}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <div className="flex justify-end gap-2">
@@ -127,7 +159,12 @@ function CreateTemplateForm({ onCreated, onCancel }: { onCreated: () => void; on
         </button>
         <button
           type="submit"
-          disabled={saving || !name.trim() || !bodyText.trim()}
+          disabled={
+            saving ||
+            !name.trim() ||
+            !bodyText.trim() ||
+            Array.from({ length: variableCount }).some((_, i) => !examples[i]?.trim())
+          }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           {saving ? "Salvando..." : "Salvar rascunho"}

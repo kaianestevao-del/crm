@@ -41,6 +41,7 @@ const createSchema = z.object({
   category: z.nativeEnum(TemplateCategory),
   language: z.string().min(1).default("pt_BR"),
   bodyText: z.string().min(1),
+  bodyExamples: z.array(z.string().min(1)).optional().default([]),
 });
 
 export async function createTemplate(req: Request, res: Response) {
@@ -51,6 +52,11 @@ export async function createTemplate(req: Request, res: Response) {
   });
   if (!session) throw new HttpError(400, "no_cloud_api_session_connected");
 
+  const variableCount = countVariables(input.bodyText);
+  if (input.bodyExamples.length !== variableCount) {
+    throw new HttpError(400, "body_examples_count_mismatch");
+  }
+
   const template = await prisma.messageTemplate.create({
     data: {
       organizationId,
@@ -59,7 +65,8 @@ export async function createTemplate(req: Request, res: Response) {
       category: input.category,
       language: input.language,
       bodyText: input.bodyText,
-      variableCount: countVariables(input.bodyText),
+      variableCount,
+      bodyExamples: input.bodyExamples,
     },
   });
   res.status(201).json(template);
@@ -89,7 +96,13 @@ export async function submitTemplate(req: Request, res: Response) {
       name: template.name,
       category: template.category,
       language: template.language,
-      components: [{ type: "BODY", text: template.bodyText }],
+      components: [
+        {
+          type: "BODY",
+          text: template.bodyText,
+          ...(template.bodyExamples.length ? { example: { body_text: [template.bodyExamples] } } : {}),
+        },
+      ],
     }),
   });
   const data = (await res_.json()) as { id?: string; status?: string; error?: { message?: string } };

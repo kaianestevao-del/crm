@@ -604,6 +604,9 @@ model MessageTemplate {
   language        String          @default("pt_BR")
   bodyText        String          // may contain {{1}}, {{2}}... (Meta's numbered placeholders)
   variableCount   Int             @default(0)
+  // Meta requires a sample value per {{n}} placeholder to approve a template — without it,
+  // submission is rejected with INVALID_FORMAT. Ordered to match {{1}}, {{2}}...
+  bodyExamples    String[]        @default([])
   metaTemplateId  String?
   status          TemplateStatus  @default(DRAFT)
   rejectionReason String?
