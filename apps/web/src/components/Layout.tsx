@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { ModuleKey, Role } from "@crm/shared";
 import { useAuth } from "../context/AuthContext";
 import { Icon, IconName } from "./Icon";
+import { ChangePasswordModal } from "./ChangePasswordModal";
 
 const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey; ownerOrAdminOnly?: boolean }[] = [
   { to: "/inbox", label: "Caixa de Entrada", icon: "chat", module: "inbox" },
@@ -19,6 +21,7 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
 
 export function Layout() {
   const { organization, user, logout } = useAuth();
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const visibleNavItems = navItems.filter((item) => {
     if (item.ownerOrAdminOnly) return organization?.role === Role.OWNER || organization?.role === Role.ADMIN;
@@ -66,8 +69,14 @@ export function Layout() {
             <p className="truncate text-xs text-gray-500">{user?.email}</p>
           </div>
           <button
+            onClick={() => setShowChangePassword(true)}
+            className="mt-1 w-full rounded-xl px-3 py-1.5 text-left text-xs font-medium text-gray-500 hover:bg-gray-100"
+          >
+            🔑 Trocar senha
+          </button>
+          <button
             onClick={logout}
-            className="mt-1 w-full rounded-xl px-3 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50"
+            className="w-full rounded-xl px-3 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50"
           >
             Sair
           </button>
@@ -76,6 +85,7 @@ export function Layout() {
       <main className="flex-1 overflow-hidden bg-gray-50">
         <Outlet />
       </main>
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
 }

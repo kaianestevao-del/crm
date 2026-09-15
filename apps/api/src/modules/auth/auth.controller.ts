@@ -123,6 +123,23 @@ export async function me(req: Request, res: Response) {
   });
 }
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+
+export async function changePassword(req: Request, res: Response) {
+  const input = changePasswordSchema.parse(req.body);
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.sub } });
+
+  const valid = await bcrypt.compare(input.currentPassword, user.passwordHash);
+  if (!valid) throw new HttpError(401, "current_password_incorrect");
+
+  const passwordHash = await bcrypt.hash(input.newPassword, 10);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  res.json({ ok: true });
+}
+
 const updateMeSchema = z.object({
   signatureEnabled: z.boolean().optional(),
   signatureName: z.string().nullable().optional(),
