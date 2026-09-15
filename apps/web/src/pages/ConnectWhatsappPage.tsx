@@ -36,13 +36,14 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
   const [accessToken, setAccessToken] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [wabaId, setWabaId] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim()) return;
+    if (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim() && !wabaId.trim()) return;
     setSaving(true);
     setError(null);
     try {
@@ -50,10 +51,12 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         cloudApiAccessToken: accessToken.trim() || undefined,
         cloudApiAppSecret: appSecret.trim() || undefined,
         cloudApiPhoneNumberId: phoneNumberId.trim() || undefined,
+        cloudApiWabaId: wabaId.trim() || undefined,
       });
       setAccessToken("");
       setAppSecret("");
       setPhoneNumberId("");
+      setWabaId("");
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -94,6 +97,12 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         placeholder="Novo Phone Number ID (opcional)"
         className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
       />
+      <input
+        value={wabaId}
+        onChange={(e) => setWabaId(e.target.value)}
+        placeholder="WABA ID (opcional — necessário para Templates/Campanhas)"
+        className="w-full rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+      />
       {error && <p className="text-[11px] text-red-600">{error}</p>}
       <div className="flex items-center justify-end gap-2">
         {saved && <span className="text-xs text-green-600">Salvo!</span>}
@@ -102,7 +111,7 @@ function CloudApiCredentialsForm({ sessionId, onClose }: { sessionId: string; on
         </button>
         <button
           type="submit"
-          disabled={saving || (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim())}
+          disabled={saving || (!accessToken.trim() && !appSecret.trim() && !phoneNumberId.trim() && !wabaId.trim())}
           className="rounded-xl bg-brand-dark px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
           Salvar
