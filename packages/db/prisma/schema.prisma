@@ -57,6 +57,37 @@ enum ScheduledMessageStatus {
   CANCELLED
 }
 
+enum TemplateCategory {
+  MARKETING
+  UTILITY
+}
+
+enum TemplateStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CampaignAudienceType {
+  TAG
+  LABEL
+  ALL
+}
+
+enum CampaignStatus {
+  DRAFT
+  SENDING
+  DONE
+  FAILED
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -75,6 +106,12 @@ model Organization {
   // lead came in from. See AutoTagRule below. Never sends anything to the customer.
   autoTaggingEnabled Boolean @default(false)
 
+  // Estimated price per delivered template message, by category — the Meta Cloud API has no
+  // "spend so far" endpoint, so Campaigns estimate cost as recipientCount × this value. Edited
+  // by the org owner on the Campaigns page as Meta's actual billed rate changes.
+  templatePriceMarketing Decimal @default(0.35)
+  templatePriceUtility   Decimal @default(0.04)
+
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
@@ -87,6 +124,8 @@ model Organization {
   quickReplies     QuickReply[]
   tags             Tag[]
   scheduledMessages ScheduledMessage[]
+  messageTemplates MessageTemplate[]
+  campaigns        Campaign[]
 }
 
 model User {
@@ -152,6 +191,10 @@ model WhatsappSession {
   cloudApiAccessToken        String?
   cloudApiAppSecret          String?
   cloudApiWebhookVerifyToken String?
+  // WhatsApp Business Account id — a different id than the phone number itself. Message
+  // Templates are managed at this level (create/list/approval-status), not per phone number,
+  // so Campaigns/Templates need it in addition to cloudApiPhoneNumberId.
+  cloudApiWabaId             String?
 
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -165,6 +208,8 @@ model WhatsappSession {
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations  Conversation[]
   whatsappLabels WhatsappLabel[]
+  messageTemplates MessageTemplate[]
+  campaigns        Campaign[]
 
   @@index([organizationId])
 }
@@ -184,6 +229,7 @@ model Contact {
   notes          Note[]
   tags           ContactTag[]
   whatsappLabels ContactWhatsappLabel[]
+  campaignRecipients CampaignRecipient[]
 
   @@unique([organizationId, waJid])
   @@index([organizationId])
@@ -414,6 +460,8 @@ model Message {
   sentByUserId String?
   sentByUser   User?   @relation("SentBy", fields: [sentByUserId], references: [id])
 
+  campaignRecipient CampaignRecipient?
+
   @@unique([conversationId, waMessageId])
   @@index([conversationId])
 }
@@ -543,5 +591,84 @@ model DealFollowUpContact {
 
   @@unique([dealStageHistoryId, index])
   @@index([dealStageHistoryId])
+}
+
+// A WhatsApp Message Template, mirrored locally from what's submitted to the Meta Cloud API.
+// Templates are the only way to send a business-initiated (proactive) message to a contact
+// outside the 24h customer-service window — Meta reviews and approves/rejects each one before
+// it can be used in a Campaign.
+model MessageTemplate {
+  id              String          @id @default(cuid())
+  name            String          // Meta's format: lowercase + underscores only
+  category        TemplateCategory
+  language        String          @default("pt_BR")
+  bodyText        String          // may contain {{1}}, {{2}}... (Meta's numbered placeholders)
+  variableCount   Int             @default(0)
+  metaTemplateId  String?
+  status          TemplateStatus  @default(DRAFT)
+  rejectionReason String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  whatsappSessionId String
+  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  campaigns Campaign[]
+
+  @@index([organizationId])
+  @@index([whatsappSessionId])
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  name          String
+  status        CampaignStatus @default(DRAFT)
+  audienceType  CampaignAudienceType
+  // Exactly one of these two is set, matching audienceType (TAG/LABEL); both null for ALL.
+  audienceTagId   String?
+  audienceLabelId String?
+  // Locked in at send time (recipientCount × the org's price-per-message at that moment), so
+  // editing the price table later doesn't retroactively change what a past campaign "cost".
+  estimatedCost Decimal?
+  createdAt     DateTime  @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  whatsappSessionId String
+  whatsappSession   WhatsappSession @relation(fields: [whatsappSessionId], references: [id], onDelete: Cascade)
+
+  templateId String
+  template   MessageTemplate @relation(fields: [templateId], references: [id])
+
+  recipients CampaignRecipient[]
+
+  @@index([organizationId])
+}
+
+model CampaignRecipient {
+  id        String                   @id @default(cuid())
+  status    CampaignRecipientStatus  @default(PENDING)
+  error     String?
+  createdAt DateTime                 @default(now())
+
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // Set once the send fires — Message.status (updated by the existing Cloud API status
+  // webhook) is what actually tracks sent/delivered/read/failed from then on.
+  messageId String? @unique
+  message   Message? @relation(fields: [messageId], references: [id])
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId])
 }
 

@@ -14,6 +14,8 @@ import { AutoRepliesPage } from "./pages/AutoRepliesPage";
 import { TeamPage } from "./pages/TeamPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { LinksPage } from "./pages/LinksPage";
+import { TemplatesPage } from "./pages/TemplatesPage";
+import { CampaignsPage } from "./pages/CampaignsPage";
 
 export function App() {
   return (
@@ -42,6 +44,8 @@ export function App() {
               <Route path="/whatsapp" element={<ConnectWhatsappPage />} />
               <Route path="/equipe" element={<TeamPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/campanhas" element={<CampaignsPage />} />
             </Route>
             <Route path="/links" element={<LinksPage />} />
           </Route>

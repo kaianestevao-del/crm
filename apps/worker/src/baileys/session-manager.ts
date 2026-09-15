@@ -705,7 +705,18 @@ async function sendCloudApiMessage(
   const to = job.waJid.split("@")[0];
   let payload: Record<string, unknown>;
 
-  if (job.mediaType === "IMAGE" && job.mediaUrl) {
+  if (job.templateName) {
+    payload = {
+      type: "template",
+      template: {
+        name: job.templateName,
+        language: { code: job.templateLanguage || "pt_BR" },
+        ...(job.templateParams?.length
+          ? { components: [{ type: "body", parameters: job.templateParams.map((text) => ({ type: "text", text })) }] }
+          : {}),
+      },
+    };
+  } else if (job.mediaType === "IMAGE" && job.mediaUrl) {
     payload = { type: "image", image: { link: job.mediaUrl, caption: job.text } };
   } else if (job.mediaType === "VIDEO" && job.mediaUrl) {
     payload = { type: "video", video: { link: job.mediaUrl, caption: job.text } };

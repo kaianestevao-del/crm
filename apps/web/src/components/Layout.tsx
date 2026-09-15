@@ -13,6 +13,8 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
   { to: "/equipe", label: "Equipe", icon: "team", ownerOrAdminOnly: true },
   { to: "/configuracoes", label: "Configurações", icon: "settings", ownerOrAdminOnly: true },
   { to: "/links", label: "Links & Contatos", icon: "link" },
+  { to: "/campanhas", label: "Campanhas", icon: "megaphone", ownerOrAdminOnly: true },
+  { to: "/templates", label: "Templates", icon: "tag", ownerOrAdminOnly: true },
 ];
 
 export function Layout() {

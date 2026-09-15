@@ -21,6 +21,8 @@ import { autoTagRulesRouter } from "./modules/auto-tag-rules/auto-tag-rules.rout
 import { teamRouter } from "./modules/team/team.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { webhooksRouter } from "./modules/webhooks/webhooks.routes";
+import { templatesRouter } from "./modules/templates/templates.routes";
+import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
@@ -54,6 +56,8 @@ app.use(scheduledMessagesRouter);
 app.use("/auto-tag-rules", autoTagRulesRouter);
 app.use("/team", teamRouter);
 app.use("/dashboard", dashboardRouter);
+app.use("/templates", templatesRouter);
+app.use("/campaigns", campaignsRouter);
 
 app.use(errorHandler);
 

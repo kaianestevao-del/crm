@@ -136,7 +136,8 @@ export type RealtimeEvent =
   | { type: "message.new"; organizationId: string; conversationId: string; message: unknown }
   | { type: "message.updated"; organizationId: string; conversationId: string; message: unknown }
   | { type: "conversation.updated"; organizationId: string; conversationId: string }
-  | { type: "contact.updated"; organizationId: string; contactId: string };
+  | { type: "contact.updated"; organizationId: string; contactId: string }
+  | { type: "campaign.updated"; organizationId: string; campaignId: string };
 
 // BullMQ queue names shared between the API (producer) and the worker (consumer).
 export const QUEUE_OUTBOUND_MESSAGES = "outbound-messages";
@@ -168,6 +169,14 @@ export interface OutboundMessageJob {
   mediaUrl?: string;
   mediaType?: MessageType;
   mediaName?: string;
+  // Set to send a Message Template instead of a free-form message — the only way to reach a
+  // contact outside the 24h customer-service window (Campaigns always set this).
+  templateName?: string;
+  templateLanguage?: string;
+  templateParams?: string[];
+  // Present only for campaign sends — the worker updates this CampaignRecipient's status
+  // (SENT/FAILED) after attempting the send, alongside the regular Message it always creates.
+  campaignRecipientId?: string;
 }
 
 // A multi-step quick reply (e.g. text, then a document, then a follow-up text) is sent as

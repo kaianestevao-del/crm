@@ -110,6 +110,11 @@ const updateCloudApiCredentialsSchema = z.object({
   cloudApiAccessToken: z.string().min(1).optional(),
   cloudApiAppSecret: z.string().min(1).optional(),
   cloudApiPhoneNumberId: z.string().min(1).optional(),
+  // WhatsApp Business Account id — not a secret (same sensitivity as the phone number id), but
+  // it's a different id than cloudApiPhoneNumberId and is what Templates/Campaigns are scoped
+  // to. Saved as plain pass-through since there's no equivalent Graph API field to validate it
+  // against the way fetchCloudApiPhoneNumber does for the phone number id.
+  cloudApiWabaId: z.string().min(1).optional(),
 });
 
 // Lets an org fix a broken Cloud API credential (expired/permission-less token being the
@@ -120,7 +125,7 @@ export async function updateCloudApiCredentials(req: Request, res: Response) {
   if (session.provider !== "CLOUD_API") throw new HttpError(400, "not_supported_for_baileys");
 
   const input = updateCloudApiCredentialsSchema.parse(req.body);
-  if (!input.cloudApiAccessToken && !input.cloudApiAppSecret && !input.cloudApiPhoneNumberId) {
+  if (!input.cloudApiAccessToken && !input.cloudApiAppSecret && !input.cloudApiPhoneNumberId && !input.cloudApiWabaId) {
     throw new HttpError(400, "nothing_to_update");
   }
 
@@ -143,6 +148,7 @@ export async function updateCloudApiCredentials(req: Request, res: Response) {
       cloudApiAccessToken: input.cloudApiAccessToken,
       cloudApiAppSecret: input.cloudApiAppSecret,
       cloudApiPhoneNumberId: input.cloudApiPhoneNumberId,
+      cloudApiWabaId: input.cloudApiWabaId,
       phoneNumber,
     },
   });

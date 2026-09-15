@@ -19,7 +19,8 @@ export type IconName =
   | "download"
   | "edit"
   | "plus"
-  | "link";
+  | "link"
+  | "megaphone";
 
 const paths: Record<IconName, JSX.Element> = {
   grid: (
@@ -151,6 +152,13 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5" />
       <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L12.5 19.5" />
+    </>
+  ),
+  megaphone: (
+    <>
+      <path d="M3 11v3a1 1 0 0 0 1 1h2l3.5 5V5L6 10H4a1 1 0 0 0-1 1Z" />
+      <path d="M13 7.5a5 5 0 0 1 0 9" />
+      <path d="M16.5 5a9 9 0 0 1 0 14" />
     </>
   ),
 };
