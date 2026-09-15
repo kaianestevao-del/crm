@@ -183,3 +183,13 @@ export async function cancelScheduledCampaign(req: Request, res: Response) {
   });
   res.json(updated);
 }
+
+// Only a DRAFT can be deleted — once sent (or scheduled), the campaign is history the org
+// needs to keep (recipient/message status), not something to erase.
+export async function deleteCampaign(req: Request, res: Response) {
+  const campaign = await getOwnedCampaign(req.auth!.organizationId, req.params.id);
+  if (campaign.status !== "DRAFT") throw new HttpError(400, "campaign_not_in_draft");
+
+  await prisma.campaign.delete({ where: { id: campaign.id } });
+  res.json({ ok: true });
+}

@@ -443,6 +443,7 @@ export function CampaignsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [showWizard, setShowWizard] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function refreshCampaigns() {
     const res = await api.get("/campaigns");
@@ -498,20 +499,45 @@ export function CampaignsPage() {
       <div className="space-y-2">
         {campaigns.map((c) => (
           <div key={c.id} className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
-            <button
-              onClick={() => setExpandedId((prev) => (prev === c.id ? null : c.id))}
-              className="flex w-full items-center justify-between gap-2 p-4 text-left"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-900">{c.name}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{c.template.name}</span>
-                {c.status === "SCHEDULED" && c.scheduledFor && (
-                  <span className="text-xs text-blue-600">{formatDateTime(c.scheduledFor)}</span>
-                )}
-              </div>
-              <span className="text-xs text-gray-400">{c._count.recipients} destinatários</span>
-            </button>
+            <div className="flex items-center gap-2 p-4">
+              <button
+                onClick={() => setExpandedId((prev) => (prev === c.id ? null : c.id))}
+                className="flex flex-1 items-center justify-between gap-2 text-left"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-gray-900">{c.name}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{c.template.name}</span>
+                  {c.status === "SCHEDULED" && c.scheduledFor && (
+                    <span className="text-xs text-blue-600">{formatDateTime(c.scheduledFor)}</span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-400">{c._count.recipients} destinatários</span>
+              </button>
+              {c.status === "DRAFT" &&
+                (confirmDeleteId === c.id ? (
+                  <span className="flex shrink-0 items-center gap-1 text-xs">
+                    <span className="text-gray-500">Apagar?</span>
+                    <button
+                      onClick={async () => {
+                        await api.delete(`/campaigns/${c.id}`);
+                        setConfirmDeleteId(null);
+                        refreshCampaigns();
+                      }}
+                      className="font-medium text-red-600 hover:underline"
+                    >
+                      Sim
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)} className="text-gray-500 hover:underline">
+                      Não
+                    </button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmDeleteId(c.id)} className="shrink-0 text-xs text-red-600 hover:underline">
+                    Apagar
+                  </button>
+                ))}
+            </div>
             {expandedId === c.id && <CampaignDetails id={c.id} onCancelled={refreshCampaigns} />}
           </div>
         ))}
