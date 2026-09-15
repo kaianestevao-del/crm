@@ -6,7 +6,6 @@ import path from "path";
 import zlib from "zlib";
 import { pipeline } from "stream/promises";
 import { Queue, Worker } from "bullmq";
-import nodemailer from "nodemailer";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType } from "@crm/db";
 import { QUEUE_DAILY_BACKUP, MessageType as SharedMessageType } from "@crm/shared";
 import { createRedisClient } from "../redis";
@@ -34,24 +33,27 @@ async function dumpDatabase(): Promise<string> {
   return gzPath;
 }
 
+// Sent over Resend's HTTPS API rather than raw SMTP — Railway blocks outbound SMTP ports
+// (25/465/587) entirely regardless of provider, which is what caused every direct-SMTP attempt
+// (Gmail, ports 465 and 587) to hang until ETIMEDOUT. An HTTPS API has no such restriction.
 async function sendByEmail(filePath: string) {
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS || !env.BACKUP_EMAIL_TO) {
+  if (!env.RESEND_API_KEY || !env.BACKUP_EMAIL_TO) {
     console.log("daily_backup_email_skipped_not_configured");
     return;
   }
-  const transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_PORT === 465,
-    auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
+  const fileContent = await fs.readFile(filePath);
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to: env.BACKUP_EMAIL_TO,
+      subject: `Backup diário do CRM WhatsApp — ${new Date().toLocaleDateString("pt-BR")}`,
+      text: "Backup automático do banco de dados em anexo.",
+      attachments: [{ filename: path.basename(filePath), content: fileContent.toString("base64") }],
+    }),
   });
-  await transporter.sendMail({
-    from: env.SMTP_FROM,
-    to: env.BACKUP_EMAIL_TO,
-    subject: `Backup diário do CRM WhatsApp — ${new Date().toLocaleDateString("pt-BR")}`,
-    text: "Backup automático do banco de dados em anexo.",
-    attachments: [{ filename: path.basename(filePath), path: filePath }],
-  });
+  if (!res.ok) throw new Error(`resend_send_failed:${await res.text()}`);
   console.log("daily_backup_email_sent", { to: env.BACKUP_EMAIL_TO });
 }
 

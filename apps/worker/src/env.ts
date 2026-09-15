@@ -21,11 +21,9 @@ export const env = {
   // Daily backup (see backup/daily-backup-worker.ts) — every field here is optional so the
   // worker still starts without them; each delivery channel just logs and skips itself when
   // its own config is missing, instead of the whole feature being all-or-nothing.
-  SMTP_HOST: process.env.SMTP_HOST,
-  SMTP_PORT: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 465,
-  SMTP_USER: process.env.SMTP_USER,
-  SMTP_PASS: process.env.SMTP_PASS,
-  SMTP_FROM: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+  // Sent via Resend's HTTPS API, not SMTP — Railway blocks outbound SMTP ports entirely.
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  RESEND_FROM: process.env.RESEND_FROM ?? "onboarding@resend.dev",
   BACKUP_EMAIL_TO: process.env.BACKUP_EMAIL_TO,
   // DDI+DDD+número, dígitos só (ex: 5575998575537) — o próprio número de WhatsApp do dono
   // que deve receber o arquivo de backup.

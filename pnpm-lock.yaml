@@ -156,9 +156,6 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1(supports-color@7.2.0)
-      nodemailer:
-        specifier: ^6.9.15
-        version: 6.10.1
       pino:
         specifier: ^9.4.0
         version: 9.14.0
@@ -169,9 +166,6 @@ importers:
       '@types/node':
         specifier: ^20.14.15
         version: 20.19.43
-      '@types/nodemailer':
-        specifier: ^6.4.16
-        version: 6.4.24
       '@types/qrcode':
         specifier: ^1.5.5
         version: 1.5.6
@@ -1035,9 +1029,6 @@ packages:
 
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
-
-  '@types/nodemailer@6.4.24':
-    resolution: {integrity: sha512-Ww4u0rT9wQNXh4JiQaIwx3QWdcOFXzOjQA2zc+jtFYNmQiT4mIUqcDin51bDFdkzKubFnQCZNK7FIHlPKQ/q9w==}
 
   '@types/pdfkit@0.13.9':
     resolution: {integrity: sha512-RDG8Yb1zT7I01FfpwK7nMSA433XWpblMqSCtA5vJlSyavWZb303HUYPCel6JTiDDFqwGLvtAnYbH8N/e0Cb89g==}
@@ -2392,10 +2383,6 @@ packages:
   node-wav@0.0.2:
     resolution: {integrity: sha512-M6Rm/bbG6De/gKGxOpeOobx/dnGuP0dz40adqx38boqHhlWssBJZgLCPBNtb9NkrmnKYiV04xELq+R6PFOnoLA==}
     engines: {node: '>=4.4.0'}
-
-  nodemailer@6.10.1:
-    resolution: {integrity: sha512-Z+iLaBGVaSjbIzQ4pX6XV41HrooLsQ10ZWPUehGmuantvzWoDVBnmsdUcOIDM1t+yPor5pDhVlDESgOMEGxhHA==}
-    engines: {node: '>=6.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -3856,10 +3843,6 @@ snapshots:
   '@types/node@20.19.43':
     dependencies:
       undici-types: 6.21.0
-
-  '@types/nodemailer@6.4.24':
-    dependencies:
-      '@types/node': 20.19.43
 
   '@types/pdfkit@0.13.9':
     dependencies:
@@ -5422,8 +5405,6 @@ snapshots:
   node-releases@2.0.54: {}
 
   node-wav@0.0.2: {}
-
-  nodemailer@6.10.1: {}
 
   normalize-path@3.0.0: {}
 
