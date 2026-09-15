@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import axios from "axios";
 import { api } from "../lib/api";
 
 type TemplateStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED";
@@ -140,6 +141,8 @@ export function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function refresh() {
     const res = await api.get("/templates");
@@ -152,11 +155,23 @@ export function TemplatesPage() {
 
   async function submitForApproval(id: string) {
     setBusyId(id);
+    setActionError(null);
     try {
       await api.post(`/templates/${id}/submit`);
       await refresh();
-    } catch {
-      alert("Não foi possível enviar para aprovação. Confira se o WABA ID e o token estão configurados em Conexão WhatsApp.");
+    } catch (err) {
+      const code = axios.isAxiosError(err) ? (err.response?.data as { error?: string } | undefined)?.error : undefined;
+      setActionError({
+        id,
+        message:
+          code === "cloud_api_waba_not_configured"
+            ? "Salve o WABA ID e o token de acesso em Conexão WhatsApp antes de enviar."
+            : code === "no_cloud_api_session_connected"
+              ? "Nenhuma conexão via API Oficial encontrada."
+              : code?.startsWith("meta_template_submit_failed:")
+                ? `Meta recusou: ${code.slice("meta_template_submit_failed:".length)}`
+                : "Não foi possível enviar para aprovação.",
+      });
     } finally {
       setBusyId(null);
     }
@@ -164,17 +179,20 @@ export function TemplatesPage() {
 
   async function syncStatus(id: string) {
     setBusyId(id);
+    setActionError(null);
     try {
       await api.post(`/templates/${id}/sync-status`);
       await refresh();
+    } catch {
+      setActionError({ id, message: "Não foi possível consultar o status na Meta." });
     } finally {
       setBusyId(null);
     }
   }
 
   async function remove(id: string) {
-    if (!confirm("Apagar este template?")) return;
     await api.delete(`/templates/${id}`);
+    setConfirmDeleteId(null);
     await refresh();
   }
 
@@ -226,15 +244,28 @@ export function TemplatesPage() {
                     Atualizar status
                   </button>
                 )}
-                <button onClick={() => remove(t.id)} className="text-xs text-red-600 hover:underline">
-                  Apagar
-                </button>
+                {confirmDeleteId === t.id ? (
+                  <span className="flex items-center gap-1 text-xs">
+                    <span className="text-gray-500">Apagar?</span>
+                    <button onClick={() => remove(t.id)} className="font-medium text-red-600 hover:underline">
+                      Sim
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)} className="text-gray-500 hover:underline">
+                      Não
+                    </button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmDeleteId(t.id)} className="text-xs text-red-600 hover:underline">
+                    Apagar
+                  </button>
+                )}
               </div>
             </div>
             <p className="whitespace-pre-wrap text-sm text-gray-600">{t.bodyText}</p>
             {t.status === "REJECTED" && t.rejectionReason && (
               <p className="mt-1 text-xs text-red-600">Motivo da rejeição: {t.rejectionReason}</p>
             )}
+            {actionError?.id === t.id && <p className="mt-1 text-xs text-red-600">{actionError.message}</p>}
           </div>
         ))}
         {templates.length === 0 && !showForm && <p className="text-sm text-gray-400">Nenhum template criado ainda.</p>}
