@@ -170,6 +170,18 @@ export interface OutboundMessageJob {
   mediaName?: string;
 }
 
+// A multi-step quick reply (e.g. text, then a document, then a follow-up text) is sent as
+// one job with job.name "send-sequence" instead of several separate "send" jobs — the
+// outbound queue's concurrency (multiple *different* jobs run in parallel) would otherwise
+// not guarantee these parts arrive to the customer in the order they were configured.
+export interface OutboundMessageSequenceJob {
+  organizationId: string;
+  sessionId: string;
+  conversationId: string;
+  waJid: string;
+  steps: Omit<OutboundMessageJob, "organizationId" | "sessionId" | "conversationId" | "waJid">[];
+}
+
 export interface InboundCloudMessageJob {
   sessionId: string;
   organizationId: string;

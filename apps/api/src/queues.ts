@@ -6,6 +6,7 @@ import {
   QUEUE_SCHEDULED_MESSAGES,
   QUEUE_INBOUND_CLOUD_MESSAGES,
   OutboundMessageJob,
+  OutboundMessageSequenceJob,
   SessionCommandJob,
   LabelCommandJob,
   ScheduledMessageJob,
@@ -18,7 +19,7 @@ const connection = createRedisClient();
 // Safe to retry: sendOutboundMessage only lets a genuine send failure (never a later DB-write
 // hiccup after WhatsApp/Meta already accepted the message) reach BullMQ as a job failure, so a
 // retry here can never resend something the customer already received.
-export const outboundMessagesQueue = new Queue<OutboundMessageJob>(QUEUE_OUTBOUND_MESSAGES, {
+export const outboundMessagesQueue = new Queue<OutboundMessageJob | OutboundMessageSequenceJob>(QUEUE_OUTBOUND_MESSAGES, {
   connection,
   defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
 });

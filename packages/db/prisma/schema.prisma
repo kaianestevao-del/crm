@@ -281,13 +281,9 @@ model QuickReplyCategory {
 }
 
 model QuickReply {
-  id        String         @id @default(cuid())
+  id        String   @id @default(cuid())
   title     String
-  type      QuickReplyType @default(TEXT)
-  content   String?
-  mediaUrl  String?
-  mediaName String?
-  createdAt DateTime       @default(now())
+  createdAt DateTime @default(now())
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -295,7 +291,24 @@ model QuickReply {
   categoryId String?
   category   QuickReplyCategory? @relation(fields: [categoryId], references: [id])
 
+  // Ordered parts sent as separate WhatsApp messages, one after another, when this quick
+  // reply is triggered — e.g. a confirmation text, then a document, then a follow-up text.
+  steps QuickReplyStep[]
+
   @@index([organizationId])
+}
+
+model QuickReplyStep {
+  id           String         @id @default(cuid())
+  quickReplyId String
+  quickReply   QuickReply     @relation(fields: [quickReplyId], references: [id], onDelete: Cascade)
+  order        Int
+  type         QuickReplyType @default(TEXT)
+  content      String?
+  mediaUrl     String?
+  mediaName    String?
+
+  @@index([quickReplyId])
 }
 
 model Conversation {

@@ -109,10 +109,63 @@ function withSignature(text: string | undefined | null, sender: { name: string; 
   return text && text.trim().length > 0 ? `${text}\n\n${suffix}` : suffix;
 }
 
+const WEEKDAY_NAMES = [
+  "domingo",
+  "segunda-feira",
+  "terça-feira",
+  "quarta-feira",
+  "quinta-feira",
+  "sexta-feira",
+  "sábado",
+];
+
+// Placeholders a quick reply's text can use, filled in with the actual contact/date at the
+// moment the message is about to be sent (or previewed) — never stored pre-substituted, so
+// editing the quick reply later doesn't leave stale names/dates baked into old messages.
+function applyTags(text: string, contact: { name: string | null; phoneNumber: string }): string {
+  if (!text) return text;
+  const hour = new Date().getHours();
+  const saudacao = hour < 12 ? "bom dia" : hour < 18 ? "boa tarde" : "boa noite";
+  const primeiroNome = contact.name?.trim().split(/\s+/)[0] || "";
+  return text
+    .replaceAll("{{nome}}", primeiroNome)
+    .replaceAll("{{telefone}}", contact.phoneNumber)
+    .replaceAll("{{saudacao}}", saudacao)
+    .replaceAll("{{diaSemana}}", WEEKDAY_NAMES[new Date().getDay()]);
+}
+
+// Shows what each part of a multi-step quick reply will actually say once sent — tags already
+// substituted with the real contact's data — so the attendant can review/edit before sending.
+export async function previewQuickReply(req: Request, res: Response) {
+  const auth = req.auth!;
+  const conversation = await getOwnedConversation(auth.organizationId, req.params.id);
+  const [contact, quickReply] = await Promise.all([
+    prisma.contact.findUniqueOrThrow({ where: { id: conversation.contactId } }),
+    prisma.quickReply.findFirst({
+      where: { id: req.params.quickReplyId, organizationId: auth.organizationId },
+      include: { steps: { orderBy: { order: "asc" } } },
+    }),
+  ]);
+  if (!quickReply) throw new HttpError(404, "quick_reply_not_found");
+
+  res.json({
+    steps: quickReply.steps.map((step) => ({
+      type: step.type,
+      content: step.content ? applyTags(step.content, contact) : step.content,
+      mediaUrl: step.mediaUrl,
+      mediaName: step.mediaName,
+    })),
+  });
+}
+
 const sendMessageSchema = z
   .object({
     text: z.string().min(1).optional(),
     quickReplyId: z.string().optional(),
+    // One entry per step of the quick reply, in order — the (possibly attendant-edited) text
+    // from the preview. Falls back to re-substituting the quick reply's own saved text when a
+    // step's override is missing, so calling this endpoint without previewing first still works.
+    steps: z.array(z.object({ content: z.string().optional() })).optional(),
   })
   .refine((d) => d.text || d.quickReplyId, { message: "text_or_quickReplyId_required" });
 
@@ -125,55 +178,81 @@ export async function sendMessage(req: Request, res: Response) {
     prisma.user.findUniqueOrThrow({ where: { id: auth.sub } }),
   ]);
 
-  let type: MessageType = MessageType.TEXT;
-  let content: string | null = input.text ?? null;
-  let mediaUrl: string | null = null;
-  let mediaName: string | null = null;
+  // Each entry becomes one Message row and one WhatsApp send, in this order.
+  let parts: { type: MessageType; content: string | null; mediaUrl: string | null; mediaName: string | null }[];
 
   if (input.quickReplyId) {
     const quickReply = await prisma.quickReply.findFirst({
       where: { id: input.quickReplyId, organizationId: auth.organizationId },
+      include: { steps: { orderBy: { order: "asc" } } },
     });
     if (!quickReply) throw new HttpError(404, "quick_reply_not_found");
-    // QuickReplyType (from @crm/db) and MessageType (from @crm/shared) are separately
-    // generated/declared but share the same TEXT/IMAGE/AUDIO/DOCUMENT string values.
-    type = quickReply.type as MessageType;
-    // Lets the caller edit the caption/text in a preview before sending — falls back to
-    // the quick reply's own saved content when nothing was typed over it.
-    content = input.text && input.text.trim() ? input.text.trim() : quickReply.content;
-    mediaUrl = quickReply.mediaUrl;
-    mediaName = quickReply.mediaName;
+    parts = quickReply.steps.map((step, i) => ({
+      // QuickReplyType (from @crm/db) and MessageType (from @crm/shared) are separately
+      // generated/declared but share the same TEXT/IMAGE/AUDIO/DOCUMENT string values.
+      type: step.type as MessageType,
+      content: input.steps?.[i]?.content ?? (step.content ? applyTags(step.content, contact) : step.content),
+      mediaUrl: step.mediaUrl,
+      mediaName: step.mediaName,
+    }));
+  } else {
+    parts = [{ type: MessageType.TEXT, content: applyTags(input.text!.trim(), contact), mediaUrl: null, mediaName: null }];
   }
 
-  if (!content && !mediaUrl) throw new HttpError(400, "empty_message");
+  if (parts.every((p) => !p.content && !p.mediaUrl)) throw new HttpError(400, "empty_message");
 
-  const message = await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      direction: MessageDirection.OUTBOUND,
-      type,
-      content,
-      mediaUrl,
-      status: MessageStatus.PENDING,
-      sentByUserId: auth.sub,
-    },
-  });
+  const messages = await prisma.$transaction(
+    parts.map((part) =>
+      prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: MessageDirection.OUTBOUND,
+          type: part.type,
+          content: part.content,
+          mediaUrl: part.mediaUrl,
+          status: MessageStatus.PENDING,
+          sentByUserId: auth.sub,
+        },
+      }),
+    ),
+  );
 
   await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
-  await outboundMessagesQueue.add("send", {
-    organizationId: auth.organizationId,
-    sessionId: conversation.whatsappSessionId,
-    conversationId: conversation.id,
-    messageId: message.id,
-    waJid: contact.waJid,
-    text: withSignature(content, sender),
-    mediaUrl: mediaUrl ? `${env.PUBLIC_URL}${mediaUrl}` : undefined,
-    mediaType: mediaUrl ? type : undefined,
-    mediaName: mediaName ?? undefined,
+  // The signature belongs only at the end of the whole sequence, not after every part.
+  const lastTextIndex = parts.reduce((acc, p, i) => (p.type === MessageType.TEXT ? i : acc), -1);
+
+  const jobSteps = messages.map((message, i) => {
+    const part = parts[i];
+    const text = i === lastTextIndex ? withSignature(part.content, sender) : (part.content ?? undefined);
+    return {
+      messageId: message.id,
+      text: text || undefined,
+      mediaUrl: part.mediaUrl ? `${env.PUBLIC_URL}${part.mediaUrl}` : undefined,
+      mediaType: part.mediaUrl ? part.type : undefined,
+      mediaName: part.mediaName ?? undefined,
+    };
   });
 
-  res.status(201).json(message);
+  if (jobSteps.length === 1) {
+    await outboundMessagesQueue.add("send", {
+      organizationId: auth.organizationId,
+      sessionId: conversation.whatsappSessionId,
+      conversationId: conversation.id,
+      waJid: contact.waJid,
+      ...jobSteps[0],
+    });
+  } else {
+    await outboundMessagesQueue.add("send-sequence", {
+      organizationId: auth.organizationId,
+      sessionId: conversation.whatsappSessionId,
+      conversationId: conversation.id,
+      waJid: contact.waJid,
+      steps: jobSteps,
+    });
+  }
+
+  res.status(201).json({ messages });
 }
 
 function messageTypeFromMime(mime: string): MessageType {

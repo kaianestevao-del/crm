@@ -14,6 +14,7 @@ import {
   assignConversation,
   exportConversation,
   startConversation,
+  previewQuickReply,
 } from "./conversations.controller";
 
 export const conversationsRouter = Router();
@@ -24,6 +25,7 @@ conversationsRouter.get("/", asyncHandler(listConversations));
 conversationsRouter.post("/start", asyncHandler(startConversation));
 conversationsRouter.get("/:id/messages", asyncHandler(listMessages));
 conversationsRouter.post("/:id/messages", asyncHandler(sendMessage));
+conversationsRouter.get("/:id/quick-replies/:quickReplyId/preview", asyncHandler(previewQuickReply));
 conversationsRouter.post("/:id/attachments", uploadMessageAttachment.single("file"), asyncHandler(sendAttachment));
 conversationsRouter.post("/:id/read", asyncHandler(markAsRead));
 conversationsRouter.post("/:id/unread", asyncHandler(markAsUnread));

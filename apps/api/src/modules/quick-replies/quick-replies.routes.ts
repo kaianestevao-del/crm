@@ -16,8 +16,8 @@ export const quickRepliesRouter = Router();
 quickRepliesRouter.use(requireAuth);
 
 quickRepliesRouter.get("/", asyncHandler(listQuickReplies));
-quickRepliesRouter.post("/", uploadQuickReplyMedia.single("file"), asyncHandler(createQuickReply));
-quickRepliesRouter.patch("/:id", uploadQuickReplyMedia.single("file"), asyncHandler(updateQuickReply));
+quickRepliesRouter.post("/", uploadQuickReplyMedia.array("files"), asyncHandler(createQuickReply));
+quickRepliesRouter.patch("/:id", uploadQuickReplyMedia.array("files"), asyncHandler(updateQuickReply));
 quickRepliesRouter.delete("/:id", asyncHandler(deleteQuickReply));
 
 quickRepliesRouter.get("/categories", asyncHandler(listQuickReplyCategories));

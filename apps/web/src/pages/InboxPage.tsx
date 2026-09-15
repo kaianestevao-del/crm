@@ -4,6 +4,7 @@ import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, ORIGI
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
+import { QuickReplyPreviewModal, PreviewStep } from "../components/QuickReplyPreviewModal";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
@@ -234,7 +235,10 @@ export function InboxPage() {
   const [showSignatureSettings, setShowSignatureSettings] = useState(false);
   const [showTranscriptionSettings, setShowTranscriptionSettings] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [pendingQuickReply, setPendingQuickReply] = useState<QuickReply | null>(null);
+  const [previewQuickReply, setPreviewQuickReply] = useState<{ id: string; title: string; steps: PreviewStep[] } | null>(
+    null,
+  );
+  const [sendingQuickReply, setSendingQuickReply] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
@@ -323,7 +327,7 @@ export function InboxPage() {
     setShowQuickReplies(false);
     setShowNotes(false);
     setShowScheduledMessages(false);
-    setPendingQuickReply(null);
+    setPreviewQuickReply(null);
     setDraft("");
     const res = await api.get(`/conversations/${id}/messages`);
     setMessages(res.data);
@@ -333,31 +337,37 @@ export function InboxPage() {
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
-    if (!selectedId) return;
-    if (!pendingQuickReply && !draft.trim()) return;
+    if (!selectedId || !draft.trim()) return;
     setSending(true);
     try {
-      const body = pendingQuickReply
-        ? { quickReplyId: pendingQuickReply.id, text: draft.trim() || undefined }
-        : { text: draft.trim() };
-      const res = await api.post(`/conversations/${selectedId}/messages`, body);
-      setMessages((prev) => [...prev, res.data]);
+      const res = await api.post(`/conversations/${selectedId}/messages`, { text: draft.trim() });
+      setMessages((prev) => [...prev, ...res.data.messages]);
       setDraft("");
-      setPendingQuickReply(null);
     } finally {
       setSending(false);
     }
   }
 
-  function handlePickQuickReply(quickReply: QuickReply) {
+  async function handlePickQuickReply(quickReply: QuickReply) {
     setShowQuickReplies(false);
-    setPendingQuickReply(quickReply);
-    setDraft(quickReply.content ?? "");
+    if (!selectedId) return;
+    const res = await api.get(`/conversations/${selectedId}/quick-replies/${quickReply.id}/preview`);
+    setPreviewQuickReply({ id: quickReply.id, title: quickReply.title, steps: res.data.steps });
   }
 
-  function cancelPendingQuickReply() {
-    setPendingQuickReply(null);
-    setDraft("");
+  async function sendPreviewedQuickReply(steps: PreviewStep[]) {
+    if (!selectedId || !previewQuickReply) return;
+    setSendingQuickReply(true);
+    try {
+      const res = await api.post(`/conversations/${selectedId}/messages`, {
+        quickReplyId: previewQuickReply.id,
+        steps: steps.map((s) => ({ content: s.content ?? undefined })),
+      });
+      setMessages((prev) => [...prev, ...res.data.messages]);
+      setPreviewQuickReply(null);
+    } finally {
+      setSendingQuickReply(false);
+    }
   }
 
   async function sendAttachmentFile(file: File) {
@@ -838,16 +848,14 @@ export function InboxPage() {
                 />
               )}
 
-              {pendingQuickReply && (
-                <div className="mb-2 flex items-center justify-between rounded-xl border border-brand bg-brand/5 px-3 py-2 text-xs">
-                  <span>
-                    Pré-visualizando resposta rápida: <strong>{pendingQuickReply.title}</strong>
-                    {pendingQuickReply.type !== "TEXT" && " (mídia anexada)"}
-                  </span>
-                  <button type="button" onClick={cancelPendingQuickReply} className="text-red-600 hover:underline">
-                    Cancelar
-                  </button>
-                </div>
+              {previewQuickReply && (
+                <QuickReplyPreviewModal
+                  title={previewQuickReply.title}
+                  steps={previewQuickReply.steps}
+                  sending={sendingQuickReply}
+                  onSend={sendPreviewedQuickReply}
+                  onCancel={() => setPreviewQuickReply(null)}
+                />
               )}
 
               <AudioRecorderBar recorder={audioRecorder} onSend={sendAttachmentFile} />
@@ -891,7 +899,7 @@ export function InboxPage() {
                 <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder={pendingQuickReply ? "Edite antes de enviar (opcional)..." : "Digite uma mensagem..."}
+                  placeholder="Digite uma mensagem..."
                   className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
                 />
                 <button
