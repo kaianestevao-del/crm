@@ -27,3 +27,9 @@ export const uploadQuickReplyMedia = multer({
   storage: diskStorage("quick-replies"),
   limits: { fileSize: 25 * 1024 * 1024 },
 });
+
+// Parsed once for its rows and discarded — nothing to serve later, so no disk storage needed.
+export const uploadSpreadsheet = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
