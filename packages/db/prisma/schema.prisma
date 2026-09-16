@@ -103,6 +103,12 @@ model Organization {
   // a lead — shown as "X de N" on deals sitting in a FOLLOW_UP-role stage.
   followUpMessageTarget Int @default(13)
 
+  // Delay between each step of a multi-step quick reply's sequential send — without it, all
+  // steps hit WhatsApp near-simultaneously and can arrive out of order. Read once by the API
+  // when building the sequence job (see conversations.controller.ts sendMessage), not re-read
+  // per step by the worker.
+  quickReplyStepDelaySeconds Int @default(3)
+
   // Autoatendimento: NOT an auto-reply — a keyword found in an inbound message links that
   // contact to one or more existing Abas (Tags), e.g. to record which ad/story/bio link a
   // lead came in from. See AutoTagRule below. Never sends anything to the customer.

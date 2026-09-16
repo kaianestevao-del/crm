@@ -1,3 +1,4 @@
+import path from "path";
 import { Request, Response } from "express";
 import { z } from "zod";
 import PDFDocument from "pdfkit";
@@ -6,6 +7,8 @@ import { prisma } from "../../prisma";
 import { env } from "../../env";
 import { HttpError } from "../../utils/httpError";
 import { outboundMessagesQueue } from "../../queues";
+import { publishRealtimeEvent } from "../../pubsub";
+import { transcodeToOpusOgg } from "../../media/transcodeAudio";
 
 export async function listConversations(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
@@ -243,11 +246,16 @@ export async function sendMessage(req: Request, res: Response) {
       ...jobSteps[0],
     });
   } else {
+    const org = await prisma.organization.findUnique({
+      where: { id: auth.organizationId },
+      select: { quickReplyStepDelaySeconds: true },
+    });
     await outboundMessagesQueue.add("send-sequence", {
       organizationId: auth.organizationId,
       sessionId: conversation.whatsappSessionId,
       conversationId: conversation.id,
       waJid: contact.waJid,
+      delayMs: (org?.quickReplyStepDelaySeconds ?? 3) * 1000,
       steps: jobSteps,
     });
   }
@@ -275,7 +283,18 @@ export async function sendAttachment(req: Request, res: Response) {
   ]);
 
   const type = messageTypeFromMime(file.mimetype);
-  const mediaUrl = `/uploads/messages/${file.filename}`;
+  let mediaUrl = `/uploads/messages/${file.filename}`;
+
+  if (type === MessageType.AUDIO) {
+    try {
+      const { filename } = await transcodeToOpusOgg(file.path, path.dirname(file.path));
+      mediaUrl = `/uploads/messages/${filename}`;
+    } catch (err) {
+      // Fail open — keep the original file and let the send attempt it as-is rather than
+      // blocking the message entirely on a transcoder bug.
+      console.error("audio_transcode_failed", err);
+    }
+  }
 
   const message = await prisma.message.create({
     data: {
@@ -307,14 +326,20 @@ export async function sendAttachment(req: Request, res: Response) {
 }
 
 export async function markAsRead(req: Request, res: Response) {
-  const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
+  const auth = req.auth!;
+  const conversation = await getOwnedConversation(auth.organizationId, req.params.id);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { unreadCount: 0 } });
+  // So another attendant's tab/session for the same org sees the unread badge clear too —
+  // without this, only the tab that made the request ever reflects the change.
+  publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
   res.json({ ok: true });
 }
 
 export async function markAsUnread(req: Request, res: Response) {
-  const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
+  const auth = req.auth!;
+  const conversation = await getOwnedConversation(auth.organizationId, req.params.id);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { unreadCount: 1 } });
+  publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
   res.json({ ok: true });
 }
 

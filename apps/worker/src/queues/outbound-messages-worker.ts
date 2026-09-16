@@ -44,9 +44,10 @@ export function createOutboundMessagesWorker() {
       // awaits here (one worker slot, sequential) guarantees that regardless of the
       // concurrency below, which only bounds how many *different* jobs run in parallel.
       if (job.name === "send-sequence") {
-        const { steps, ...shared } = job.data as OutboundMessageSequenceJob;
-        for (const step of steps) {
-          await sendOutboundMessage({ ...shared, ...step });
+        const { steps, delayMs, ...shared } = job.data as OutboundMessageSequenceJob;
+        for (let i = 0; i < steps.length; i++) {
+          if (i > 0 && delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+          await sendOutboundMessage({ ...shared, ...steps[i] });
         }
         return;
       }

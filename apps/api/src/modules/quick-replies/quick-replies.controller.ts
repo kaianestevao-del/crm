@@ -5,6 +5,7 @@ import { z } from "zod";
 import { QuickReplyType } from "@crm/db";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
+import { transcodeToOpusOgg } from "../../media/transcodeAudio";
 
 const QUICK_REPLY_UPLOADS_DIR = path.join(__dirname, "../../../uploads/quick-replies");
 
@@ -86,28 +87,43 @@ const upsertSchema = z.object({
 
 // Builds the create-input for each step, consuming uploaded files in order for steps flagged
 // `hasNewFile`. Throws if a non-TEXT step has neither a new file nor an existing one to reuse.
-function buildStepsData(steps: z.infer<typeof upsertSchema>["steps"], files: Express.Multer.File[]) {
+// A new AUDIO file is transcoded to OGG/Opus (see transcodeAudio.ts) before it's stored — the
+// admin can upload any audio format here, and only OGG/Opus is guaranteed deliverable via the
+// Cloud API, so this step's media must already be compatible by the time it's sent.
+async function buildStepsData(steps: z.infer<typeof upsertSchema>["steps"], files: Express.Multer.File[]) {
   let fileIndex = 0;
-  return steps.map((step, order) => {
-    let mediaUrl = step.existingMediaUrl ?? null;
-    let mediaName = step.existingMediaName ?? null;
-    if (step.hasNewFile) {
-      const file = files[fileIndex++];
-      if (!file) throw new HttpError(400, "missing_file_for_step");
-      mediaUrl = `/uploads/quick-replies/${file.filename}`;
-      mediaName = file.originalname;
-    }
-    if (step.type !== QuickReplyType.TEXT && !mediaUrl) {
-      throw new HttpError(400, "media_file_required_for_this_type");
-    }
-    return { order, type: step.type, content: step.content || null, mediaUrl, mediaName };
-  });
+  return Promise.all(
+    steps.map(async (step, order) => {
+      let mediaUrl = step.existingMediaUrl ?? null;
+      let mediaName = step.existingMediaName ?? null;
+      if (step.hasNewFile) {
+        const file = files[fileIndex++];
+        if (!file) throw new HttpError(400, "missing_file_for_step");
+        mediaName = file.originalname;
+        if (step.type === QuickReplyType.AUDIO) {
+          try {
+            const { filename } = await transcodeToOpusOgg(file.path, QUICK_REPLY_UPLOADS_DIR);
+            mediaUrl = `/uploads/quick-replies/${filename}`;
+          } catch (err) {
+            console.error("audio_transcode_failed", err);
+            mediaUrl = `/uploads/quick-replies/${file.filename}`;
+          }
+        } else {
+          mediaUrl = `/uploads/quick-replies/${file.filename}`;
+        }
+      }
+      if (step.type !== QuickReplyType.TEXT && !mediaUrl) {
+        throw new HttpError(400, "media_file_required_for_this_type");
+      }
+      return { order, type: step.type, content: step.content || null, mediaUrl, mediaName };
+    }),
+  );
 }
 
 export async function createQuickReply(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const input = upsertSchema.parse(req.body);
-  const stepsData = buildStepsData(input.steps, (req.files as Express.Multer.File[] | undefined) ?? []);
+  const stepsData = await buildStepsData(input.steps, (req.files as Express.Multer.File[] | undefined) ?? []);
 
   const quickReply = await prisma.quickReply.create({
     data: {
@@ -124,7 +140,7 @@ export async function createQuickReply(req: Request, res: Response) {
 export async function updateQuickReply(req: Request, res: Response) {
   const existing = await getOwnedQuickReply(req.auth!.organizationId, req.params.id);
   const input = upsertSchema.parse(req.body);
-  const stepsData = buildStepsData(input.steps, (req.files as Express.Multer.File[] | undefined) ?? []);
+  const stepsData = await buildStepsData(input.steps, (req.files as Express.Multer.File[] | undefined) ?? []);
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.quickReplyStep.deleteMany({ where: { quickReplyId: existing.id } });

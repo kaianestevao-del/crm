@@ -10,6 +10,7 @@ function toOrgResponse(org: {
   groqApiKey: string | null;
   autoTaggingEnabled: boolean;
   followUpMessageTarget: number;
+  quickReplyStepDelaySeconds: number;
   templatePriceMarketing: unknown;
   templatePriceUtility: unknown;
 }) {
@@ -19,6 +20,7 @@ function toOrgResponse(org: {
     hasGroqApiKey: !!org.groqApiKey,
     autoTaggingEnabled: org.autoTaggingEnabled,
     followUpMessageTarget: org.followUpMessageTarget,
+    quickReplyStepDelaySeconds: org.quickReplyStepDelaySeconds,
     templatePriceMarketing: Number(org.templatePriceMarketing),
     templatePriceUtility: Number(org.templatePriceUtility),
   };
@@ -33,6 +35,7 @@ const updateSchema = z.object({
   groqApiKey: z.string().nullable().optional(),
   autoTaggingEnabled: z.boolean().optional(),
   followUpMessageTarget: z.number().int().min(1).optional(),
+  quickReplyStepDelaySeconds: z.number().int().min(0).max(30).optional(),
   templatePriceMarketing: z.number().min(0).optional(),
   templatePriceUtility: z.number().min(0).optional(),
 });
@@ -49,6 +52,7 @@ export async function updateMyOrganization(req: Request, res: Response) {
       ...(input.groqApiKey !== undefined ? { groqApiKey: input.groqApiKey?.trim() || null } : {}),
       ...(input.autoTaggingEnabled !== undefined ? { autoTaggingEnabled: input.autoTaggingEnabled } : {}),
       ...(input.followUpMessageTarget !== undefined ? { followUpMessageTarget: input.followUpMessageTarget } : {}),
+      ...(input.quickReplyStepDelaySeconds !== undefined ? { quickReplyStepDelaySeconds: input.quickReplyStepDelaySeconds } : {}),
       ...(input.templatePriceMarketing !== undefined ? { templatePriceMarketing: input.templatePriceMarketing } : {}),
       ...(input.templatePriceUtility !== undefined ? { templatePriceUtility: input.templatePriceUtility } : {}),
     },

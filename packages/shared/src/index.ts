@@ -82,6 +82,7 @@ export const ORIGIN_TAGS_PT = [
   "Link na Bio do Instagram",
   "Social Selling Instagram",
   "Social Selling WhatsApp",
+  "Social Selling Stories",
   "Site",
   "Tráfego Pago",
   "Diagnóstico Nutricional",
@@ -188,6 +189,10 @@ export interface OutboundMessageSequenceJob {
   sessionId: string;
   conversationId: string;
   waJid: string;
+  // Milliseconds to wait between each step's send (not before the first) — see
+  // Organization.quickReplyStepDelaySeconds. Resolved once by the API when the job is built,
+  // not re-read per step by the worker.
+  delayMs?: number;
   steps: Omit<OutboundMessageJob, "organizationId" | "sessionId" | "conversationId" | "waJid">[];
 }
 

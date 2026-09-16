@@ -18,6 +18,7 @@ import { TranscriptionSettings } from "../components/TranscriptionSettings";
 import { AudioRecorderBar } from "../components/AudioRecorderBar";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { NewConversationModal } from "../components/NewConversationModal";
+import { MediaLightbox } from "../components/MediaLightbox";
 import { ScheduledMessages } from "../components/ScheduledMessages";
 import { Icon } from "../components/Icon";
 
@@ -90,6 +91,7 @@ const MEDIA_PREVIEW_LABEL: Partial<Record<MessageType, string>> = {
   [MessageType.AUDIO]: "🎤 Áudio",
   [MessageType.VIDEO]: "🎞️ Vídeo",
   [MessageType.DOCUMENT]: "📄 Documento",
+  [MessageType.STICKER]: "🌟 Sticker",
   [MessageType.CONTACT]: "👤 Contato",
   [MessageType.LOCATION]: "📍 Localização",
   [MessageType.UNKNOWN]: "Mensagem não suportada",
@@ -125,12 +127,21 @@ function formatMessageTime(iso: string) {
 function MessageBubble({
   message,
   onStartConversationWithContact,
+  onOpenLightbox,
 }: {
   message: Message;
   onStartConversationWithContact: (phoneNumber: string, name: string) => void;
+  onOpenLightbox: (src: string) => void;
 }) {
   const outbound = message.direction === MessageDirection.OUTBOUND;
   const mediaSrc = message.mediaUrl ? `${API_URL}${message.mediaUrl}` : null;
+  const isMediaType = [
+    MessageType.IMAGE,
+    MessageType.AUDIO,
+    MessageType.VIDEO,
+    MessageType.DOCUMENT,
+    MessageType.STICKER,
+  ].includes(message.type);
 
   return (
     <div
@@ -144,7 +155,12 @@ function MessageBubble({
         </p>
       )}
       {message.type === MessageType.IMAGE && mediaSrc && (
-        <img src={mediaSrc} alt="" className="mb-1 max-h-64 rounded-xl object-cover" />
+        <img
+          src={mediaSrc}
+          alt=""
+          onClick={() => onOpenLightbox(mediaSrc)}
+          className="mb-1 max-h-64 cursor-pointer rounded-xl object-cover"
+        />
       )}
       {message.type === MessageType.VIDEO && mediaSrc && <video src={mediaSrc} controls className="mb-1 max-h-64 rounded-xl" />}
       {message.type === MessageType.AUDIO && mediaSrc && (
@@ -168,6 +184,14 @@ function MessageBubble({
         >
           📄 Abrir documento
         </a>
+      )}
+      {message.type === MessageType.STICKER && mediaSrc && (
+        <img src={mediaSrc} alt="sticker" className="mb-1 h-32 w-32 object-contain" />
+      )}
+      {isMediaType && !mediaSrc && (
+        <p className={`mb-1 text-xs italic ${outbound ? "text-white/70" : "text-gray-400"}`}>
+          ⚠️ Mídia indisponível (falha ao baixar)
+        </p>
       )}
       {message.type === MessageType.CONTACT && (
         <div className="mb-1 space-y-1.5">
@@ -249,6 +273,7 @@ export function InboxPage() {
   const [confirmDeleteConversationFor, setConfirmDeleteConversationFor] = useState<string | null>(null);
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [editingContactName, setEditingContactName] = useState(false);
   const [contactNameDraft, setContactNameDraft] = useState("");
@@ -300,19 +325,38 @@ export function InboxPage() {
     const onContactUpdated = () => {
       refreshConversations();
     };
+    // Fires on the very first connection AND every silent reconnect (dropped wifi, laptop
+    // sleep, an idle-timeout from the hosting proxy) — any realtime event that happened while
+    // disconnected is otherwise lost forever, which is what made the inbox look stuck until an
+    // F5 (F5 only "fixed" it because it re-fetches over REST, bypassing the socket entirely).
+    const onConnect = () => {
+      refreshConversations();
+      if (selectedId) {
+        api.get(`/conversations/${selectedId}/messages`).then((res) => setMessages(res.data));
+      }
+    };
 
     socket.on("message.new", onNewMessage);
     socket.on("message.updated", onMessageUpdated);
     socket.on("conversation.updated", onConversationUpdated);
     socket.on("contact.updated", onContactUpdated);
+    socket.on("connect", onConnect);
     return () => {
       socket.off("message.new", onNewMessage);
       socket.off("message.updated", onMessageUpdated);
       socket.off("conversation.updated", onConversationUpdated);
       socket.off("contact.updated", onContactUpdated);
+      socket.off("connect", onConnect);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  // Defensive fallback on top of the realtime socket, given this is a live support inbox —
+  // bounds how stale the list can ever get even if a disconnect/reconnect cycle is somehow missed.
+  useEffect(() => {
+    const interval = setInterval(refreshConversations, 45000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     setEditingContactName(false);
@@ -835,7 +879,12 @@ export function InboxPage() {
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto bg-gray-50 p-4">
               {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} onStartConversationWithContact={startConversationWithPhone} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  onStartConversationWithContact={startConversationWithPhone}
+                  onOpenLightbox={setLightboxSrc}
+                />
               ))}
               <div ref={bottomRef} />
             </div>
@@ -926,6 +975,8 @@ export function InboxPage() {
       {showNewConversation && (
         <NewConversationModal onClose={() => setShowNewConversation(false)} onCreated={handleConversationCreated} />
       )}
+
+      {lightboxSrc && <MediaLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </div>
   );
 }

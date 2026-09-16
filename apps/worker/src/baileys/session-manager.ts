@@ -521,6 +521,9 @@ async function recordMessage(
   if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
 
   const type = detectMessageType(msg);
+  if (type === MessageType.UNKNOWN) {
+    console.error("baileys_inbound_unknown_type", { waMessageId: key.id, messageKeys: Object.keys(msg.message ?? {}) });
+  }
   const text =
     msg.message.conversation ??
     msg.message.extendedTextMessage?.text ??
@@ -907,6 +910,10 @@ interface CloudApiMessage {
     phones?: { phone?: string; wa_id?: string }[];
   }[];
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
+  // Meta's own explanation when it delivers `type: "unsupported"` — a codec/container it
+  // couldn't process on its end, distinct from `statuses[].errors` (which is about *our*
+  // outbound sends failing, already logged above as cloud_api_message_failed).
+  errors?: { code?: number; title?: string; message?: string; error_data?: { details?: string } }[];
 }
 
 interface CloudApiStatus {
@@ -956,6 +963,14 @@ export async function processInboundCloudMessage(job: InboundCloudMessageJob) {
 
   for (const m of value.messages) {
     const type = detectCloudMessageType(m.type);
+    // Meta itself sometimes can't process a given inbound message (e.g. a voice-note codec it
+    // doesn't support) and delivers `type: "unsupported"` instead of the real media type — that
+    // falls into detectCloudMessageType's default/UNKNOWN branch. Logging the raw payload here
+    // is the only way to diagnose that after the fact (Meta's own error detail comes back in
+    // `m.errors`, not visible anywhere else).
+    if (type === MessageType.UNKNOWN) {
+      console.error("cloud_inbound_unsupported_type", { waMessageId: m.id, rawType: m.type, errors: m.errors, raw: m });
+    }
     const text =
       m.text?.body ??
       m.image?.caption ??

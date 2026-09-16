@@ -20,12 +20,17 @@ export function SettingsPage() {
   const [savingTarget, setSavingTarget] = useState(false);
   const [targetSaved, setTargetSaved] = useState(false);
 
+  const [stepDelay, setStepDelay] = useState("");
+  const [savingDelay, setSavingDelay] = useState(false);
+  const [delaySaved, setDelaySaved] = useState(false);
+
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [savingStageId, setSavingStageId] = useState<string | null>(null);
 
   async function refresh() {
     const [orgRes, pipelinesRes] = await Promise.all([api.get("/organizations/me"), api.get("/pipelines")]);
     setFollowUpTarget(String(orgRes.data.followUpMessageTarget));
+    setStepDelay(String(orgRes.data.quickReplyStepDelaySeconds));
     setPipeline(pipelinesRes.data[0] ?? null);
   }
 
@@ -43,6 +48,19 @@ export function SettingsPage() {
       setTargetSaved(true);
     } finally {
       setSavingTarget(false);
+    }
+  }
+
+  async function handleSaveDelay() {
+    const value = Number(stepDelay);
+    if (!Number.isInteger(value) || value < 0 || value > 30) return;
+    setSavingDelay(true);
+    setDelaySaved(false);
+    try {
+      await api.patch("/organizations/me", { quickReplyStepDelaySeconds: value });
+      setDelaySaved(true);
+    } finally {
+      setSavingDelay(false);
     }
   }
 
@@ -93,6 +111,35 @@ export function SettingsPage() {
               Salvar
             </button>
             {targetSaved && <span className="text-xs text-emerald-600">Salvo ✓</span>}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="mb-1 text-sm font-medium">Intervalo entre mensagens de uma Resposta Rápida</p>
+          <p className="mb-3 text-xs text-gray-500">
+            Segundos de espera entre cada etapa de uma Resposta Rápida com várias mensagens — evita que todas
+            saiam de uma vez e cheguem fora de ordem pro contato.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={30}
+              value={stepDelay}
+              onChange={(e) => {
+                setStepDelay(e.target.value);
+                setDelaySaved(false);
+              }}
+              className="w-24 rounded-xl border border-gray-300 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
+            />
+            <button
+              onClick={handleSaveDelay}
+              disabled={savingDelay || !stepDelay.trim()}
+              className="rounded-xl bg-brand-dark px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              Salvar
+            </button>
+            {delaySaved && <span className="text-xs text-emerald-600">Salvo ✓</span>}
           </div>
         </div>
 
