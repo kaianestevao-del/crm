@@ -278,6 +278,7 @@ export function InboxPage() {
   const [editingContactName, setEditingContactName] = useState(false);
   const [contactNameDraft, setContactNameDraft] = useState("");
   const [savingContactName, setSavingContactName] = useState(false);
+  const [phoneCopied, setPhoneCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -796,6 +797,21 @@ export function InboxPage() {
                       </button>
                     </>
                   )}
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(selectedConversation.contact.phoneNumber);
+                        setPhoneCopied(true);
+                        setTimeout(() => setPhoneCopied(false), 1500);
+                      } catch {
+                        // Clipboard API unavailable — the number is still visible to copy by hand.
+                      }
+                    }}
+                    title="Copiar número"
+                    className="rounded-lg px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  >
+                    {phoneCopied ? "Copiado!" : `+${selectedConversation.contact.phoneNumber} 📋`}
+                  </button>
                 </div>
                 <div className="relative flex gap-2">
                   <button

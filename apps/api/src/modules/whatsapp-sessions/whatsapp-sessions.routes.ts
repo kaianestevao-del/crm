@@ -11,6 +11,7 @@ import {
   deleteSession,
   refreshCloudApiPhoneNumber,
   updateCloudApiCredentials,
+  updateSessionPhoneNumber,
 } from "./whatsapp-sessions.controller";
 
 export const whatsappSessionsRouter = Router();
@@ -23,5 +24,6 @@ whatsappSessionsRouter.post("/:id/restart", asyncHandler(restartSession));
 whatsappSessionsRouter.post("/:id/logout", asyncHandler(logoutSession));
 whatsappSessionsRouter.post("/:id/resync-labels", asyncHandler(resyncLabels));
 whatsappSessionsRouter.post("/:id/refresh-phone-number", asyncHandler(refreshCloudApiPhoneNumber));
+whatsappSessionsRouter.patch("/:id/phone-number", asyncHandler(updateSessionPhoneNumber));
 whatsappSessionsRouter.patch("/:id/cloud-api-credentials", asyncHandler(updateCloudApiCredentials));
 whatsappSessionsRouter.delete("/:id", asyncHandler(deleteSession));

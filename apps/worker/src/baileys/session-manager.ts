@@ -402,12 +402,16 @@ async function upsertContactAndRecordMessage(
 
   const existingContact = await prisma.contact.findUnique({
     where: { organizationId_waJid: { organizationId, waJid: jid } },
-    select: { id: true },
+    select: { id: true, name: true },
   });
 
+  // Only auto-fill the name from WhatsApp's pushName the first time a contact is seen — once
+  // any name exists (whether auto-filled here or set manually via the pencil-icon edit in the
+  // Inbox), it's the CRM's own record and must never be silently reverted by a later inbound
+  // message just because the contact's WhatsApp display name is present.
   const contact = await prisma.contact.upsert({
     where: { organizationId_waJid: { organizationId, waJid: jid } },
-    update: pushName && !fromMe ? { name: pushName } : {},
+    update: pushName && !fromMe && !existingContact?.name ? { name: pushName } : {},
     create: { organizationId, waJid: jid, phoneNumber, name: fromMe ? undefined : pushName },
   });
 

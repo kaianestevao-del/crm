@@ -188,6 +188,22 @@ export async function refreshCloudApiPhoneNumber(req: Request, res: Response) {
   res.json(toSessionResponse(updated));
 }
 
+const updatePhoneNumberSchema = z.object({ phoneNumber: z.string().min(8) });
+
+// Manual override for when Meta's own Graph API reports the wrong number for this WABA (seen
+// in practice: display_phone_number missing a digit) — refreshCloudApiPhoneNumber above just
+// re-fetches the same wrong value in that case, so there needs to be a way to correct it by
+// hand. Persisted on the session itself (not just client-side in Links & Contatos' localStorage)
+// so it's correct from any device, not just the browser where someone happened to fix it.
+export async function updateSessionPhoneNumber(req: Request, res: Response) {
+  const session = await getOwnedSession(req.auth!.organizationId, req.params.id);
+  const input = updatePhoneNumberSchema.parse(req.body);
+  const phoneNumber = input.phoneNumber.replace(/\D/g, "");
+  if (phoneNumber.length < 8) throw new HttpError(400, "invalid_phone_number");
+  const updated = await prisma.whatsappSession.update({ where: { id: session.id }, data: { phoneNumber } });
+  res.json(toSessionResponse(updated));
+}
+
 export async function resyncLabels(req: Request, res: Response) {
   const session = await getOwnedSession(req.auth!.organizationId, req.params.id);
   if (session.provider === "CLOUD_API") throw new HttpError(400, "not_supported_for_cloud_api");
