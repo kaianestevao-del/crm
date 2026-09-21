@@ -724,8 +724,11 @@ export function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-4">
+        <CashBox />
+      </div>
 
+      <div className="mt-4 grid grid-cols-1 gap-4">
         <Panel title="Cohort por mês de chegada" subtitle="Toque na lupa para ver a origem dos leads">
           {data.cohorts.length > 1 && (
             <div className="mb-4 flex flex-wrap gap-1.5">
