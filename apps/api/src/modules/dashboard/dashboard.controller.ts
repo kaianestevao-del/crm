@@ -95,7 +95,9 @@ async function getAvgResponseSeconds(organizationId: string): Promise<number | n
 // bound at Contact.createdAt: history-synced / imported messages carry their real (older)
 // createdAt while the Contact row is inserted later, so the old `BETWEEN c.createdAt AND paidAt`
 // silently dropped them — a freshly-paid patient could show up with 0 messages.
-// "Start" of the relationship = the contact's first message (fallback: Contact.createdAt).
+// "Start" of the relationship = the contact's first message. Only payers with message history in
+// the CRM count: patients bulk-imported with a historical payment have no messages here, and
+// including them would drag every average to ~0.
 async function getFirstPaymentStats(organizationId: string) {
   const rows = await prisma.$queryRaw<
     { avg_days: number | null; avg_inbound: number | null; avg_outbound: number | null }[]
@@ -119,6 +121,7 @@ async function getFirstPaymentStats(organizationId: string) {
       LEFT JOIN "Conversation" conv ON conv."contactId" = c.id
       LEFT JOIN "Message" m ON m."conversationId" = conv.id
       GROUP BY fp."contactId", fp.first_paid_at, c."createdAt"
+      HAVING COUNT(m.id) > 0
     )
     SELECT
       AVG(EXTRACT(EPOCH FROM (first_paid_at - started_at)) / 86400.0) FILTER (WHERE first_paid_at >= started_at) AS avg_days,
@@ -139,16 +142,16 @@ async function getFirstPaymentStats(organizationId: string) {
   };
 }
 
-// Whole-CRM view of the message funnel: totals up to first payment, conversion of contacted
-// leads, and how much effort went into leads that gave up (Unfollow stage, never paid).
+// Conversion + give-up effort, over contacts that have message history in the CRM. Patients
+// bulk-imported with a historical payment (no messages here) are reported separately as
+// `paidWithoutHistory` instead of being counted as "contacted" — otherwise they inflate the rate.
 async function getMessageFunnel(organizationId: string) {
   const rows = await prisma.$queryRaw<
     {
       contacted: bigint;
       converted: bigint;
       outbound_total: bigint | null;
-      outbound_converted: bigint | null;
-      inbound_converted: bigint | null;
+      paid_without_history: bigint;
       gave_up: bigint;
       avg_outbound_gave_up: number | null;
     }[]
@@ -172,9 +175,8 @@ async function getMessageFunnel(organizationId: string) {
         c.id,
         fp.first_paid_at,
         uf.gave_up_at,
+        COUNT(m.id) AS msg_total,
         COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND') AS out_total,
-        COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND fp.first_paid_at IS NOT NULL AND m."createdAt" <= fp.first_paid_at) AS out_to_pay,
-        COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND' AND fp.first_paid_at IS NOT NULL AND m."createdAt" <= fp.first_paid_at) AS in_to_pay,
         COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND uf.gave_up_at IS NOT NULL AND m."createdAt" <= uf.gave_up_at) AS out_to_give_up
       FROM "Contact" c
       LEFT JOIN first_payment fp ON fp."contactId" = c.id
@@ -185,27 +187,23 @@ async function getMessageFunnel(organizationId: string) {
       GROUP BY c.id, fp.first_paid_at, uf.gave_up_at
     )
     SELECT
-      COUNT(*) FILTER (WHERE out_total > 0 OR first_paid_at IS NOT NULL) AS contacted,
-      COUNT(*) FILTER (WHERE first_paid_at IS NOT NULL) AS converted,
-      SUM(out_total) FILTER (WHERE out_total > 0 OR first_paid_at IS NOT NULL) AS outbound_total,
-      SUM(out_to_pay) AS outbound_converted,
-      SUM(in_to_pay) AS inbound_converted,
-      COUNT(*) FILTER (WHERE gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS gave_up,
-      AVG(out_to_give_up) FILTER (WHERE gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS avg_outbound_gave_up
+      COUNT(*) FILTER (WHERE msg_total > 0) AS contacted,
+      COUNT(*) FILTER (WHERE msg_total > 0 AND first_paid_at IS NOT NULL) AS converted,
+      SUM(out_total) FILTER (WHERE msg_total > 0) AS outbound_total,
+      COUNT(*) FILTER (WHERE msg_total = 0 AND first_paid_at IS NOT NULL) AS paid_without_history,
+      COUNT(*) FILTER (WHERE msg_total > 0 AND gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS gave_up,
+      AVG(out_to_give_up) FILTER (WHERE msg_total > 0 AND gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS avg_outbound_gave_up
     FROM per_contact
   `;
   const r = rows[0];
   const contacted = Number(r?.contacted ?? 0);
   const converted = Number(r?.converted ?? 0);
-  const outboundTotal = Number(r?.outbound_total ?? 0);
   return {
     contacted,
     converted,
     conversionRate: contacted > 0 ? converted / contacted : null,
-    outboundTotal,
-    outboundUntilPayment: Number(r?.outbound_converted ?? 0),
-    inboundUntilPayment: Number(r?.inbound_converted ?? 0),
-    outboundPerConversion: converted > 0 ? Number(r?.outbound_converted ?? 0) / converted : null,
+    outboundTotal: Number(r?.outbound_total ?? 0),
+    paidWithoutHistory: Number(r?.paid_without_history ?? 0),
     gaveUp: Number(r?.gave_up ?? 0),
     avgOutboundUntilGiveUp: r?.avg_outbound_gave_up == null ? null : Number(r.avg_outbound_gave_up),
   };

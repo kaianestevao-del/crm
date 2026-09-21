@@ -31,9 +31,7 @@ interface MessageFunnel {
   converted: number;
   conversionRate: number | null;
   outboundTotal: number;
-  outboundUntilPayment: number;
-  inboundUntilPayment: number;
-  outboundPerConversion: number | null;
+  paidWithoutHistory: number;
   gaveUp: number;
   avgOutboundUntilGiveUp: number | null;
 }
@@ -150,7 +148,16 @@ function formatSeconds(seconds: number | null): string {
 
 function formatDays(days: number | null): string {
   if (days == null) return "Sem dados";
+  if (days < 1) {
+    const hours = Math.round(days * 24);
+    return hours < 1 ? "menos de 1h" : `${hours}h`;
+  }
   return `${Math.round(days)} dias`;
+}
+
+// One decimal below 10 so a real average like 0.4 doesn't round away to "0".
+function formatAvg(value: number): string {
+  return value < 10 ? value.toFixed(1).replace(".", ",") : String(Math.round(value));
 }
 
 function formatContacts(count: number | null): string {
@@ -211,49 +218,6 @@ function Panel({
       </div>
       <div className={noPadding ? "" : "p-5"}>{children}</div>
     </div>
-  );
-}
-
-function FunnelPanel({ funnel, avgDaysToFirstPayment }: { funnel: MessageFunnel; avgDaysToFirstPayment: number | null }) {
-  return (
-    <Panel title="Funil de mensagens" subtitle="Todos os contatos do CRM, até o 1º pagamento ou até desistir">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div>
-              <p className="text-xs text-gray-500">Recebidas até pagar</p>
-              <p className="text-xl font-semibold text-gray-800">{funnel.inboundUntilPayment}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Enviadas até pagar</p>
-              <p className="text-xl font-semibold text-gray-800">{funnel.outboundUntilPayment}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Conversão (contatados)</p>
-              <p className="text-xl font-semibold text-emerald-600">
-                {funnel.conversionRate == null ? "—" : `${(funnel.conversionRate * 100).toFixed(1)}%`}
-              </p>
-              <p className="text-[11px] text-gray-400">
-                {funnel.converted} de {funnel.contacted} · {funnel.outboundTotal} msgs enviadas
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Msgs enviadas por venda</p>
-              <p className="text-xl font-semibold text-gray-800">
-                {funnel.outboundPerConversion == null ? "—" : Math.round(funnel.outboundPerConversion)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Msgs enviadas até desistir</p>
-              <p className="text-xl font-semibold text-red-500">
-                {funnel.avgOutboundUntilGiveUp == null ? "—" : Math.round(funnel.avgOutboundUntilGiveUp)}
-              </p>
-              <p className="text-[11px] text-gray-400">média de {funnel.gaveUp} desistências</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Tempo médio até 1º pagamento</p>
-              <p className="text-xl font-semibold text-brand-dark">{formatDays(avgDaysToFirstPayment)}</p>
-            </div>
-          </div>
-    </Panel>
   );
 }
 
@@ -346,7 +310,7 @@ export function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Mensagens até o 1º pagamento" subtitle="Volume médio de conversa">
+        <Panel title="Mensagens até o 1º pagamento" subtitle="Média por paciente com histórico de conversa no CRM">
           {data.avgMessagesToFirstPayment ? (
             <div className="flex gap-6">
               <div className="flex items-center gap-3">
@@ -355,29 +319,49 @@ export function DashboardPage() {
                 </span>
                 <div>
                   <p className="text-xs text-gray-500">Recebidas</p>
-                  <p className="text-xl font-semibold text-gray-800">{Math.round(data.avgMessagesToFirstPayment.inbound)}</p>
+                  <p className="text-xl font-semibold text-gray-800">{formatAvg(data.avgMessagesToFirstPayment.inbound)}</p>
                 </div>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Enviadas</p>
-                <p className="text-xl font-semibold text-gray-800">{Math.round(data.avgMessagesToFirstPayment.outbound)}</p>
+                <p className="text-xl font-semibold text-gray-800">{formatAvg(data.avgMessagesToFirstPayment.outbound)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Total</p>
-                <p className="text-xl font-semibold text-brand-dark">{Math.round(data.avgMessagesToFirstPayment.total)}</p>
+                <p className="text-xl font-semibold text-brand-dark">{formatAvg(data.avgMessagesToFirstPayment.total)}</p>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-gray-400">Sem pagamentos registrados ainda.</p>
+            <p className="text-sm text-gray-400">Nenhum pagamento com histórico de mensagens ainda.</p>
+          )}
+          {data.funnel && (
+            <div className="mt-4 grid grid-cols-2 gap-4 border-t border-gray-100 pt-4">
+              <div>
+                <p className="text-xs text-gray-500">Conversão das conversas</p>
+                <p className="text-xl font-semibold text-emerald-600">
+                  {data.funnel.conversionRate == null ? "—" : `${(data.funnel.conversionRate * 100).toFixed(1)}%`}
+                </p>
+                <p className="text-[11px] text-gray-400">
+                  {data.funnel.converted} de {data.funnel.contacted} · {data.funnel.outboundTotal} msgs enviadas
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Enviadas até desistir</p>
+                <p className="text-xl font-semibold text-red-500">
+                  {data.funnel.avgOutboundUntilGiveUp == null ? "—" : formatAvg(data.funnel.avgOutboundUntilGiveUp)}
+                </p>
+                <p className="text-[11px] text-gray-400">média de {data.funnel.gaveUp} desistências</p>
+              </div>
+              {data.funnel.paidWithoutHistory > 0 && (
+                <p className="col-span-2 text-[11px] text-gray-400">
+                  {data.funnel.paidWithoutHistory} pacientes com pagamento importado, sem histórico de mensagens, ficam fora
+                  destas médias.
+                </p>
+              )}
+            </div>
           )}
         </Panel>
       </div>
-
-      {data.funnel && (
-        <div className="mt-4">
-          <FunnelPanel funnel={data.funnel} avgDaysToFirstPayment={data.avgDaysToFirstPayment} />
-        </div>
-      )}
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="Pagamentos recentes" noPadding>
