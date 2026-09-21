@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { Icon, IconName } from "../components/Icon";
 
@@ -25,7 +26,105 @@ interface Cohort {
   channels: CohortChannel[];
 }
 
+interface MessageFunnel {
+  contacted: number;
+  converted: number;
+  conversionRate: number | null;
+  outboundTotal: number;
+  outboundUntilPayment: number;
+  inboundUntilPayment: number;
+  outboundPerConversion: number | null;
+  gaveUp: number;
+  avgOutboundUntilGiveUp: number | null;
+}
+
+interface ChannelLead {
+  contactId: string;
+  name: string | null;
+  phoneNumber: string;
+  converted: boolean;
+  firstPaidAt: string | null;
+  totalPaid: number | null;
+  inbound: number;
+  outbound: number;
+}
+
+function ChannelLeads({ month, channel }: { month: string; channel: string }) {
+  const navigate = useNavigate();
+  const [leads, setLeads] = useState<ChannelLead[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [showConverted, setShowConverted] = useState(false);
+  const [showNotConverted, setShowNotConverted] = useState(false);
+
+  useEffect(() => {
+    api
+      .get("/dashboard/channel-leads", { params: { month, channel } })
+      .then((res) => setLeads(res.data))
+      .catch(() => setFailed(true));
+  }, [month, channel]);
+
+  if (failed) return <p className="mt-1 text-[11px] text-red-500">Não foi possível carregar os leads.</p>;
+  if (!leads) return <p className="mt-1 text-[11px] text-gray-400">Carregando...</p>;
+
+  const converted = leads.filter((l) => l.converted);
+  const notConverted = leads.filter((l) => !l.converted);
+
+  function renderList(list: ChannelLead[]) {
+    return (
+      <ul className="mt-1 divide-y divide-gray-100 rounded-lg border border-gray-100 bg-white">
+        {list.map((l) => (
+          <li key={l.contactId} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-gray-800">{l.name?.trim() || `+${l.phoneNumber}`}</p>
+              <p className="text-[10px] text-gray-400">
+                {l.inbound} recebidas · {l.outbound} enviadas{l.converted ? " até o 1º pagamento" : ""}
+                {l.totalPaid != null ? ` · ${currencyFormatter.format(l.totalPaid)}` : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/inbox", { state: { contactId: l.contactId } })}
+              className="shrink-0 rounded-lg bg-brand px-2 py-1 text-[10px] font-medium text-white hover:bg-brand-dark"
+            >
+              Ir para a Caixa de Entrada
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowConverted((v) => !v)}
+          className="flex w-full items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-medium text-emerald-700"
+        >
+          <span>Converteram ({converted.length})</span>
+          <span>{showConverted ? "−" : "+"}</span>
+        </button>
+        {showConverted && (converted.length ? renderList(converted) : <p className="mt-1 text-[11px] text-gray-400">Ninguém ainda.</p>)}
+      </div>
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowNotConverted((v) => !v)}
+          className="flex w-full items-center justify-between rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-medium text-gray-600"
+        >
+          <span>Não converteram ({notConverted.length})</span>
+          <span>{showNotConverted ? "−" : "+"}</span>
+        </button>
+        {showNotConverted &&
+          (notConverted.length ? renderList(notConverted) : <p className="mt-1 text-[11px] text-gray-400">Todos converteram.</p>)}
+      </div>
+    </div>
+  );
+}
+
 interface DashboardSummary {
+  funnel: MessageFunnel;
   patients: { active: number; vencida: number };
   avgResponseSeconds: number | null;
   avgDaysToFirstPayment: number | null;
@@ -118,6 +217,7 @@ export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedCohort, setExpandedCohort] = useState<string | null>(null);
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -229,6 +329,47 @@ export function DashboardPage() {
         </Panel>
       </div>
 
+      <div className="mt-4">
+        <Panel title="Funil de mensagens" subtitle="Todos os contatos do CRM, até o 1º pagamento ou até desistir">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-gray-500">Recebidas até pagar</p>
+              <p className="text-xl font-semibold text-gray-800">{data.funnel.inboundUntilPayment}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Enviadas até pagar</p>
+              <p className="text-xl font-semibold text-gray-800">{data.funnel.outboundUntilPayment}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Conversão (contatados)</p>
+              <p className="text-xl font-semibold text-emerald-600">
+                {data.funnel.conversionRate == null ? "—" : `${(data.funnel.conversionRate * 100).toFixed(1)}%`}
+              </p>
+              <p className="text-[11px] text-gray-400">
+                {data.funnel.converted} de {data.funnel.contacted} · {data.funnel.outboundTotal} msgs enviadas
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Msgs enviadas por venda</p>
+              <p className="text-xl font-semibold text-gray-800">
+                {data.funnel.outboundPerConversion == null ? "—" : Math.round(data.funnel.outboundPerConversion)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Msgs enviadas até desistir</p>
+              <p className="text-xl font-semibold text-red-500">
+                {data.funnel.avgOutboundUntilGiveUp == null ? "—" : Math.round(data.funnel.avgOutboundUntilGiveUp)}
+              </p>
+              <p className="text-[11px] text-gray-400">média de {data.funnel.gaveUp} desistências</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Tempo médio até 1º pagamento</p>
+              <p className="text-xl font-semibold text-brand-dark">{formatDays(data.avgDaysToFirstPayment)}</p>
+            </div>
+          </div>
+        </Panel>
+      </div>
+
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel title="Pagamentos recentes" noPadding>
           {data.recentPayments.length === 0 ? (
@@ -312,10 +453,22 @@ export function DashboardPage() {
                         {c.channels.map((ch) => {
                           const chPct = ch.totalLeads > 0 ? Math.round((ch.convertedCount / ch.totalLeads) * 100) : 0;
                           const barWidth = Math.round((ch.totalLeads / maxChannelLeads) * 100);
+                          const chKey = `${c.label}||${ch.name}`;
+                          const chOpen = expandedChannel === chKey;
                           return (
                             <div key={ch.name}>
                               <div className="mb-0.5 flex items-center justify-between text-[11px] text-gray-500">
-                                <span>{ch.name}</span>
+                                <span className="flex items-center gap-1">
+                                  {ch.name}
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedChannel(chOpen ? null : chKey)}
+                                    className={`rounded px-1 text-[10px] font-medium hover:bg-gray-200 ${chOpen ? "text-brand-dark" : "text-gray-400"}`}
+                                    title="Ver quem chegou por este canal"
+                                  >
+                                    {chOpen ? "▾ leads" : "▸ leads"}
+                                  </button>
+                                </span>
                                 <span>
                                   {ch.convertedCount} de {ch.totalLeads} · {chPct}%
                                 </span>
@@ -323,6 +476,7 @@ export function DashboardPage() {
                               <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
                                 <div className="h-full rounded-full bg-brand-dark/60" style={{ width: `${barWidth}%` }} />
                               </div>
+                              {chOpen && <ChannelLeads month={c.label} channel={ch.name} />}
                             </div>
                           );
                         })}

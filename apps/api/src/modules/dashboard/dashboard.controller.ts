@@ -13,6 +13,7 @@ export async function getDashboardSummary(req: Request, res: Response) {
     followUpOutcomes,
     cohorts,
     revenue,
+    funnel,
   ] = await Promise.all([
     getPatientCounts(organizationId),
     getAvgResponseSeconds(organizationId),
@@ -21,6 +22,7 @@ export async function getDashboardSummary(req: Request, res: Response) {
     getFollowUpOutcomes(organizationId),
     getMonthlyCohorts(organizationId),
     getRevenueStats(organizationId),
+    getMessageFunnel(organizationId),
   ]);
 
   res.json({
@@ -32,6 +34,7 @@ export async function getDashboardSummary(req: Request, res: Response) {
     followUpOutcomes,
     cohorts,
     revenue,
+    funnel,
   });
 }
 
@@ -88,58 +91,123 @@ async function getAvgResponseSeconds(organizationId: string): Promise<number | n
   return value == null ? null : Number(value);
 }
 
+// Counts every message of the contact's conversations up to their first payment, with no lower
+// bound at Contact.createdAt: history-synced / imported messages carry their real (older)
+// createdAt while the Contact row is inserted later, so the old `BETWEEN c.createdAt AND paidAt`
+// silently dropped them — a freshly-paid patient could show up with 0 messages.
+// "Start" of the relationship = the contact's first message (fallback: Contact.createdAt).
 async function getFirstPaymentStats(organizationId: string) {
-  const [daysRows, msgRows] = await Promise.all([
-    // fp.first_paid_at >= c."createdAt" excludes contacts bulk-imported with a historical
-    // payment attached — their Contact row was inserted today, so the naive diff would come
-    // out negative even though the payment is real; there's no reliable per-contact arrival
-    // date for those beyond the month-level tag, so they're left out of this average instead
-    // of skewing it.
-    prisma.$queryRaw<{ avg_days: number | null }[]>`
-      WITH first_payment AS (
-        SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
-        FROM "DealPayment" dp
-        JOIN "Deal" d ON d.id = dp."dealId"
-        WHERE d."organizationId" = ${organizationId}
-        GROUP BY d."contactId"
-      )
-      SELECT AVG(EXTRACT(EPOCH FROM (fp.first_paid_at - c."createdAt")) / 86400.0) AS avg_days
-      FROM "Contact" c
-      JOIN first_payment fp ON fp."contactId" = c.id
-      WHERE c."organizationId" = ${organizationId} AND fp.first_paid_at >= c."createdAt"
-    `,
-    prisma.$queryRaw<{ avg_inbound: number | null; avg_outbound: number | null }[]>`
-      WITH first_payment AS (
-        SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
-        FROM "DealPayment" dp
-        JOIN "Deal" d ON d.id = dp."dealId"
-        WHERE d."organizationId" = ${organizationId}
-        GROUP BY d."contactId"
-      ),
-      per_contact AS (
-        SELECT
-          fp."contactId",
-          COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND') AS inbound_count,
-          COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND') AS outbound_count
-        FROM first_payment fp
-        JOIN "Contact" c ON c.id = fp."contactId"
-        LEFT JOIN "Conversation" conv ON conv."contactId" = c.id
-        LEFT JOIN "Message" m ON m."conversationId" = conv.id AND m."createdAt" BETWEEN c."createdAt" AND fp.first_paid_at
-        GROUP BY fp."contactId"
-      )
-      SELECT AVG(inbound_count) AS avg_inbound, AVG(outbound_count) AS avg_outbound FROM per_contact
-    `,
-  ]);
+  const rows = await prisma.$queryRaw<
+    { avg_days: number | null; avg_inbound: number | null; avg_outbound: number | null }[]
+  >`
+    WITH first_payment AS (
+      SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
+      FROM "DealPayment" dp
+      JOIN "Deal" d ON d.id = dp."dealId"
+      WHERE d."organizationId" = ${organizationId}
+      GROUP BY d."contactId"
+    ),
+    per_contact AS (
+      SELECT
+        fp."contactId",
+        fp.first_paid_at,
+        COALESCE(MIN(m."createdAt"), c."createdAt") AS started_at,
+        COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND' AND m."createdAt" <= fp.first_paid_at) AS inbound_count,
+        COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND m."createdAt" <= fp.first_paid_at) AS outbound_count
+      FROM first_payment fp
+      JOIN "Contact" c ON c.id = fp."contactId"
+      LEFT JOIN "Conversation" conv ON conv."contactId" = c.id
+      LEFT JOIN "Message" m ON m."conversationId" = conv.id
+      GROUP BY fp."contactId", fp.first_paid_at, c."createdAt"
+    )
+    SELECT
+      AVG(EXTRACT(EPOCH FROM (first_paid_at - started_at)) / 86400.0) FILTER (WHERE first_paid_at >= started_at) AS avg_days,
+      AVG(inbound_count) AS avg_inbound,
+      AVG(outbound_count) AS avg_outbound
+    FROM per_contact
+  `;
 
-  const avgDays = daysRows[0]?.avg_days;
-  const inbound = msgRows[0]?.avg_inbound;
-  const outbound = msgRows[0]?.avg_outbound;
+  const row = rows[0];
+  const inbound = row?.avg_inbound;
+  const outbound = row?.avg_outbound;
   return {
-    avgDays: avgDays == null ? null : Number(avgDays),
+    avgDays: row?.avg_days == null ? null : Number(row.avg_days),
     avgMessages:
       inbound == null && outbound == null
         ? null
         : { inbound: Number(inbound ?? 0), outbound: Number(outbound ?? 0), total: Number(inbound ?? 0) + Number(outbound ?? 0) },
+  };
+}
+
+// Whole-CRM view of the message funnel: totals up to first payment, conversion of contacted
+// leads, and how much effort went into leads that gave up (Unfollow stage, never paid).
+async function getMessageFunnel(organizationId: string) {
+  const rows = await prisma.$queryRaw<
+    {
+      contacted: bigint;
+      converted: bigint;
+      outbound_total: bigint | null;
+      outbound_converted: bigint | null;
+      inbound_converted: bigint | null;
+      gave_up: bigint;
+      avg_outbound_gave_up: number | null;
+    }[]
+  >`
+    WITH first_payment AS (
+      SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at
+      FROM "DealPayment" dp JOIN "Deal" d ON d.id = dp."dealId"
+      WHERE d."organizationId" = ${organizationId}
+      GROUP BY d."contactId"
+    ),
+    unfollow AS (
+      SELECT d."contactId", MAX(dsh."enteredAt") AS gave_up_at
+      FROM "Deal" d
+      JOIN "PipelineStage" ps ON ps.id = d."stageId" AND ps.role = 'UNFOLLOW'
+      JOIN "DealStageHistory" dsh ON dsh."dealId" = d.id AND dsh."stageId" = ps.id
+      WHERE d."organizationId" = ${organizationId}
+      GROUP BY d."contactId"
+    ),
+    per_contact AS (
+      SELECT
+        c.id,
+        fp.first_paid_at,
+        uf.gave_up_at,
+        COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND') AS out_total,
+        COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND fp.first_paid_at IS NOT NULL AND m."createdAt" <= fp.first_paid_at) AS out_to_pay,
+        COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND' AND fp.first_paid_at IS NOT NULL AND m."createdAt" <= fp.first_paid_at) AS in_to_pay,
+        COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND uf.gave_up_at IS NOT NULL AND m."createdAt" <= uf.gave_up_at) AS out_to_give_up
+      FROM "Contact" c
+      LEFT JOIN first_payment fp ON fp."contactId" = c.id
+      LEFT JOIN unfollow uf ON uf."contactId" = c.id
+      LEFT JOIN "Conversation" conv ON conv."contactId" = c.id
+      LEFT JOIN "Message" m ON m."conversationId" = conv.id
+      WHERE c."organizationId" = ${organizationId}
+      GROUP BY c.id, fp.first_paid_at, uf.gave_up_at
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE out_total > 0 OR first_paid_at IS NOT NULL) AS contacted,
+      COUNT(*) FILTER (WHERE first_paid_at IS NOT NULL) AS converted,
+      SUM(out_total) FILTER (WHERE out_total > 0 OR first_paid_at IS NOT NULL) AS outbound_total,
+      SUM(out_to_pay) AS outbound_converted,
+      SUM(in_to_pay) AS inbound_converted,
+      COUNT(*) FILTER (WHERE gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS gave_up,
+      AVG(out_to_give_up) FILTER (WHERE gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS avg_outbound_gave_up
+    FROM per_contact
+  `;
+  const r = rows[0];
+  const contacted = Number(r?.contacted ?? 0);
+  const converted = Number(r?.converted ?? 0);
+  const outboundTotal = Number(r?.outbound_total ?? 0);
+  return {
+    contacted,
+    converted,
+    conversionRate: contacted > 0 ? converted / contacted : null,
+    outboundTotal,
+    outboundUntilPayment: Number(r?.outbound_converted ?? 0),
+    inboundUntilPayment: Number(r?.inbound_converted ?? 0),
+    outboundPerConversion: converted > 0 ? Number(r?.outbound_converted ?? 0) / converted : null,
+    gaveUp: Number(r?.gave_up ?? 0),
+    avgOutboundUntilGiveUp: r?.avg_outbound_gave_up == null ? null : Number(r.avg_outbound_gave_up),
   };
 }
 
@@ -310,4 +378,88 @@ async function getMonthlyCohorts(organizationId: string) {
       return (MONTH_NAMES_PT as readonly string[]).indexOf(aMonth) - (MONTH_NAMES_PT as readonly string[]).indexOf(bMonth);
     });
   return sorted;
+}
+
+// Drill-down behind the cohort's magnifier: who arrived in `month` through `channel`, and who
+// converted. Uses the same month/channel bucketing as getMonthlyCohorts so the numbers match.
+export async function getChannelLeads(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const month = String(req.query.month ?? "");
+  const channel = String(req.query.channel ?? "");
+  if (!month || !channel) return res.status(400).json({ error: "month_and_channel_required" });
+
+  const monthNamesPattern = MONTH_NAMES_PT.join("|");
+  const rows = await prisma.$queryRawUnsafe<
+    {
+      contactId: string;
+      name: string | null;
+      phoneNumber: string;
+      converted: boolean;
+      firstPaidAt: Date | null;
+      totalPaid: number | null;
+      inbound: bigint;
+      outbound: bigint;
+    }[]
+  >(
+    `
+    WITH month_tags AS (
+      SELECT id, name FROM "Tag"
+      WHERE "organizationId" = $1 AND name ~ '^(${monthNamesPattern})/\d{4}$'
+    ),
+    contact_month AS (
+      SELECT DISTINCT ON (ct."contactId") ct."contactId", mt.name AS tag_name
+      FROM "ContactTag" ct JOIN month_tags mt ON mt.id = ct."tagId"
+    ),
+    origin_tags AS (
+      SELECT id, name FROM "Tag" WHERE "organizationId" = $1 AND name = ANY($2::text[])
+    ),
+    contact_origin AS (
+      SELECT DISTINCT ON (ct."contactId") ct."contactId", ot.name AS origin_name
+      FROM "ContactTag" ct JOIN origin_tags ot ON ot.id = ct."tagId"
+    ),
+    pay AS (
+      SELECT d."contactId", MIN(dp."paidAt") AS first_paid_at, SUM(dp.value) AS total_paid
+      FROM "Deal" d JOIN "DealPayment" dp ON dp."dealId" = d.id
+      WHERE d."organizationId" = $1
+      GROUP BY d."contactId"
+    )
+    SELECT
+      c.id AS "contactId",
+      c.name,
+      c."phoneNumber",
+      (pay.first_paid_at IS NOT NULL) AS converted,
+      pay.first_paid_at AS "firstPaidAt",
+      pay.total_paid AS "totalPaid",
+      COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND' AND (pay.first_paid_at IS NULL OR m."createdAt" <= pay.first_paid_at)) AS inbound,
+      COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND (pay.first_paid_at IS NULL OR m."createdAt" <= pay.first_paid_at)) AS outbound
+    FROM "Contact" c
+    LEFT JOIN contact_month cm ON cm."contactId" = c.id
+    LEFT JOIN contact_origin co ON co."contactId" = c.id
+    LEFT JOIN pay ON pay."contactId" = c.id
+    LEFT JOIN "Conversation" conv ON conv."contactId" = c.id
+    LEFT JOIN "Message" m ON m."conversationId" = conv.id
+    WHERE c."organizationId" = $1
+      AND COALESCE(cm.tag_name, '${OLDER_BUCKET_LABEL}') = $3
+      AND COALESCE(co.origin_name, '${OTHER_ORIGIN_LABEL}') = $4
+    GROUP BY c.id, c.name, c."phoneNumber", pay.first_paid_at, pay.total_paid
+    ORDER BY converted DESC, c.name ASC NULLS LAST
+    `,
+    organizationId,
+    ORIGIN_TAGS_PT,
+    month,
+    channel,
+  );
+
+  res.json(
+    rows.map((r) => ({
+      contactId: r.contactId,
+      name: r.name,
+      phoneNumber: r.phoneNumber,
+      converted: r.converted,
+      firstPaidAt: r.firstPaidAt,
+      totalPaid: r.totalPaid == null ? null : Number(r.totalPaid),
+      inbound: Number(r.inbound),
+      outbound: Number(r.outbound),
+    })),
+  );
 }

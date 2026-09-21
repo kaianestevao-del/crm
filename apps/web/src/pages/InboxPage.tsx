@@ -293,17 +293,22 @@ export function InboxPage() {
     refreshConversations();
   }, []);
 
-  // Arriving from the Kanban board's "Ir para Caixa de Entrada" button: open that contact's
-  // conversation as soon as the list has loaded, then clear the nav state so it doesn't
-  // re-trigger on a later re-render (e.g. after sending a message).
+  // Arriving from Kanban/Contatos/Dashboard ("Ir para Caixa de Entrada"): ask the API to
+  // find (and reopen, if it had been "deleted") that contact's conversation, reload the list so
+  // it's present, then select it. Nav state is cleared first so it doesn't re-trigger.
   useEffect(() => {
     const contactId = (location.state as { contactId?: string } | null)?.contactId;
-    if (!contactId || conversations.length === 0) return;
-    const match = conversations.find((c) => c.contact.id === contactId);
-    if (match) selectConversation(match.id);
+    if (!contactId) return;
     navigate(location.pathname, { replace: true, state: {} });
+    api
+      .post("/conversations/open-by-contact", { contactId })
+      .then(async (res) => {
+        await refreshConversations();
+        await selectConversation(res.data.id);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations, location.state]);
+  }, [location.state]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -377,6 +382,7 @@ export function InboxPage() {
     const res = await api.get(`/conversations/${id}/messages`);
     setMessages(res.data);
     await api.post(`/conversations/${id}/read`);
+    window.dispatchEvent(new Event("inbox:unread-changed"));
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)));
   }
 

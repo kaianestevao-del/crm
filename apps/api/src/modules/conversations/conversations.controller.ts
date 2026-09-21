@@ -35,6 +35,32 @@ export async function listConversations(req: Request, res: Response) {
   );
 }
 
+// Total of unread messages across the inbox, for the sidebar badge.
+export async function getUnreadCount(req: Request, res: Response) {
+  const result = await prisma.conversation.aggregate({
+    where: { organizationId: req.auth!.organizationId, status: "OPEN" },
+    _sum: { unreadCount: true },
+  });
+  res.json({ count: result._sum.unreadCount ?? 0 });
+}
+
+// "Ir para a Caixa de Entrada" from the Dashboard/Contatos/Kanban: a conversation the
+// attendant had "deleted" (CLOSED) isn't in the inbox list, so navigating by contact alone
+// would silently open nothing — reopen it here so it's always findable.
+export async function openConversationByContact(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const { contactId } = z.object({ contactId: z.string() }).parse(req.body);
+  const conversation = await prisma.conversation.findFirst({
+    where: { organizationId, contactId },
+    orderBy: { lastMessageAt: "desc" },
+  });
+  if (!conversation) throw new HttpError(404, "conversation_not_found");
+  if (conversation.status !== "OPEN") {
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "OPEN" } });
+  }
+  res.json({ id: conversation.id });
+}
+
 export async function getOwnedConversation(organizationId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, organizationId } });
   if (!conversation) throw new HttpError(404, "conversation_not_found");

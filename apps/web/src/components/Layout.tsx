@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { ModuleKey, Role } from "@crm/shared";
 import { useAuth } from "../context/AuthContext";
 import { Icon, IconName } from "./Icon";
 import { ChangePasswordModal } from "./ChangePasswordModal";
+import { api } from "../lib/api";
+import { getSocket } from "../lib/socket";
 
 const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey; ownerOrAdminOnly?: boolean }[] = [
   { to: "/inbox", label: "Caixa de Entrada", icon: "chat", module: "inbox" },
@@ -22,6 +24,32 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
 export function Layout() {
   const { organization, user, logout } = useAuth();
   const [showChangePassword, setShowChangePassword] = useState(false);
+
+  const [unreadCount, setUnreadCount] = useState(0);
+  const canSeeInbox = organization?.allowedModules.includes("inbox") ?? false;
+
+  // Green badge on "Caixa de Entrada": refetched on every realtime conversation event, when
+  // the Inbox marks something read/unread locally, and on a slow poll as a safety net.
+  useEffect(() => {
+    if (!canSeeInbox) return;
+    const refresh = () => {
+      api.get("/conversations/unread-count").then((res) => setUnreadCount(res.data.count)).catch(() => {});
+    };
+    refresh();
+    const socket = getSocket();
+    socket?.on("conversation.updated", refresh);
+    socket?.on("message.new", refresh);
+    socket?.on("connect", refresh);
+    window.addEventListener("inbox:unread-changed", refresh);
+    const interval = setInterval(refresh, 30000);
+    return () => {
+      socket?.off("conversation.updated", refresh);
+      socket?.off("message.new", refresh);
+      socket?.off("connect", refresh);
+      window.removeEventListener("inbox:unread-changed", refresh);
+      clearInterval(interval);
+    };
+  }, [canSeeInbox]);
 
   const visibleNavItems = navItems.filter((item) => {
     if (item.ownerOrAdminOnly) return organization?.role === Role.OWNER || organization?.role === Role.ADMIN;
@@ -56,6 +84,11 @@ export function Layout() {
                 <>
                   <Icon name={item.icon} className={`h-4 w-4 shrink-0 ${isActive ? "text-white" : "text-gray-400"}`} />
                   <span className="truncate">{item.label}</span>
+                  {item.to === "/inbox" && unreadCount > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-green-500 px-1.5 text-[11px] font-bold text-white">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
                 </>
               )}
             </NavLink>

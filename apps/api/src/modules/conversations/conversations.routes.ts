@@ -15,6 +15,8 @@ import {
   exportConversation,
   startConversation,
   previewQuickReply,
+  getUnreadCount,
+  openConversationByContact,
 } from "./conversations.controller";
 
 export const conversationsRouter = Router();
@@ -22,6 +24,8 @@ conversationsRouter.use(requireAuth);
 conversationsRouter.use(asyncHandler(requireModule("inbox")));
 
 conversationsRouter.get("/", asyncHandler(listConversations));
+conversationsRouter.get("/unread-count", asyncHandler(getUnreadCount));
+conversationsRouter.post("/open-by-contact", asyncHandler(openConversationByContact));
 conversationsRouter.post("/start", asyncHandler(startConversation));
 conversationsRouter.get("/:id/messages", asyncHandler(listMessages));
 conversationsRouter.post("/:id/messages", asyncHandler(sendMessage));
