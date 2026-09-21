@@ -489,3 +489,33 @@ export async function getPatientsByRole(req: Request, res: Response) {
       .sort((a, b) => (a.name?.trim() || a.phoneNumber).localeCompare(b.name?.trim() || b.phoneNumber, "pt-BR")),
   );
 }
+
+// Every payment ever recorded, for the dashboard's "Caixa" (monthly revenue chart + payments
+// grouped by month). Grouping/filtering happens in the browser — a few hundred rows.
+export async function getCashPayments(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const payments = await prisma.dealPayment.findMany({
+    where: { deal: { organizationId } },
+    orderBy: { paidAt: "desc" },
+    select: {
+      id: true,
+      value: true,
+      paidAt: true,
+      planType: true,
+      paymentMethod: true,
+      deal: { select: { contact: { select: { id: true, name: true, phoneNumber: true } } } },
+    },
+  });
+  res.json(
+    payments.map((p) => ({
+      id: p.id,
+      value: p.value,
+      paidAt: p.paidAt,
+      planType: p.planType,
+      paymentMethod: p.paymentMethod,
+      contactId: p.deal.contact.id,
+      contactName: p.deal.contact.name,
+      phoneNumber: p.deal.contact.phoneNumber,
+    })),
+  );
+}

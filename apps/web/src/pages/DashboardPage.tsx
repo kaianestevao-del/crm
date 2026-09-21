@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MONTH_NAMES_PT } from "@crm/shared";
+import { MONTH_NAMES_PT, PLAN_TYPE_LABELS, PAYMENT_METHOD_LABELS, PlanType, PaymentMethod } from "@crm/shared";
 import { api } from "../lib/api";
 import { Icon, IconName } from "../components/Icon";
 
@@ -339,6 +339,239 @@ function compareCohortsNewestFirst(a: Cohort, b: Cohort): number {
   return (MONTH_NAMES_PT as readonly string[]).indexOf(bMonth) - (MONTH_NAMES_PT as readonly string[]).indexOf(aMonth);
 }
 
+interface CashPayment {
+  id: string;
+  value: number;
+  paidAt: string;
+  planType: string | null;
+  paymentMethod: string | null;
+  contactId: string;
+  contactName: string | null;
+  phoneNumber: string;
+}
+
+interface MonthBucket {
+  key: string; // "2026-09", sortable
+  year: string;
+  label: string;
+  total: number;
+  payments: CashPayment[];
+}
+
+function bucketByMonth(payments: CashPayment[]): MonthBucket[] {
+  const map = new Map<string, MonthBucket>();
+  for (const p of payments) {
+    const d = new Date(p.paidAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    let b = map.get(key);
+    if (!b) {
+      b = { key, year: String(d.getFullYear()), label: `${MONTH_NAMES_PT[d.getMonth()]}/${d.getFullYear()}`, total: 0, payments: [] };
+      map.set(key, b);
+    }
+    b.total += p.value;
+    b.payments.push(p);
+  }
+  return [...map.values()];
+}
+
+function CashBox() {
+  const navigate = useNavigate();
+  const [payments, setPayments] = useState<CashPayment[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [year, setYear] = useState<string | null>(null); // null = not chosen yet -> newest year
+  const [search, setSearch] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  // null = untouched: only the newest month is open.
+  const [expandedMonths, setExpandedMonths] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    api
+      .get("/dashboard/cash")
+      .then((res) => setPayments(res.data))
+      .catch(() => setFailed(true));
+  }, []);
+
+  if (failed) {
+    return (
+      <Panel title="Caixa" subtitle="Faturamento por mês">
+        <p className="text-sm text-red-500">Não foi possível carregar os pagamentos.</p>
+      </Panel>
+    );
+  }
+  if (!payments) {
+    return (
+      <Panel title="Caixa" subtitle="Faturamento por mês">
+        <p className="text-sm text-gray-400">Carregando...</p>
+      </Panel>
+    );
+  }
+
+  const years = Array.from(new Set(payments.map((p) => String(new Date(p.paidAt).getFullYear())))).sort().reverse();
+  const activeYear = year ?? years[0] ?? "all"; // default: newest year that has payments
+  const term = search.trim().toLowerCase();
+  const digits = term.replace(/\D/g, "");
+
+  const inScope = payments.filter((p) => {
+    if (activeYear !== "all" && String(new Date(p.paidAt).getFullYear()) !== activeYear) return false;
+    if (!term) return true;
+    return (p.contactName ?? "").toLowerCase().includes(term) || (digits.length > 0 && p.phoneNumber.includes(digits));
+  });
+
+  const buckets = bucketByMonth(inScope);
+  const chronological = [...buckets].sort((a, b) => a.key.localeCompare(b.key));
+  const newestFirst = [...buckets].sort((a, b) => b.key.localeCompare(a.key));
+  const maxTotal = Math.max(1, ...buckets.map((b) => b.total));
+  const grandTotal = buckets.reduce((sum, b) => sum + b.total, 0);
+  const bestMonth = buckets.reduce<MonthBucket | null>((best, b) => (!best || b.total > best.total ? b : best), null);
+
+  const listBuckets = selectedMonth ? newestFirst.filter((b) => b.key === selectedMonth) : newestFirst;
+  const defaultOpen = new Set(newestFirst[0] ? [newestFirst[0].key] : []);
+  const isOpen = (b: MonthBucket) => selectedMonth !== null || (expandedMonths ?? defaultOpen).has(b.key);
+
+  function toggleMonth(b: MonthBucket) {
+    const next = new Set(expandedMonths ?? defaultOpen);
+    if (next.has(b.key)) next.delete(b.key);
+    else next.add(b.key);
+    setExpandedMonths(next);
+  }
+
+  return (
+    <Panel title="Caixa" subtitle="Faturamento por mês — toque numa barra para ver só aquele mês">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {[...years, "all"].map((y) => (
+          <button
+            key={y}
+            type="button"
+            onClick={() => {
+              setYear(y);
+              setSelectedMonth(null);
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${
+              activeYear === y ? "bg-brand text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {y === "all" ? "Todos" : y}
+          </button>
+        ))}
+        <div className="ml-auto flex w-full items-center gap-2 rounded-xl border border-gray-200 px-3 py-1.5 sm:w-64">
+          <span aria-hidden>🔍</span>
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSelectedMonth(null);
+            }}
+            placeholder="Buscar quem pagou"
+            className="w-full text-sm outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-gray-50 p-3">
+          <p className="text-[11px] text-gray-500">Total no período</p>
+          <p className="text-lg font-semibold text-brand-dark">{currencyFormatter.format(grandTotal)}</p>
+        </div>
+        <div className="rounded-xl bg-gray-50 p-3">
+          <p className="text-[11px] text-gray-500">Pagamentos</p>
+          <p className="text-lg font-semibold text-gray-800">{inScope.length}</p>
+        </div>
+        <div className="rounded-xl bg-gray-50 p-3">
+          <p className="text-[11px] text-gray-500">Mês que mais vendeu</p>
+          <p className="text-lg font-semibold text-gray-800">{bestMonth ? bestMonth.label : "—"}</p>
+          {bestMonth && <p className="text-[11px] text-gray-400">{currencyFormatter.format(bestMonth.total)}</p>}
+        </div>
+      </div>
+
+      {chronological.length === 0 ? (
+        <p className="py-6 text-center text-sm text-gray-400">Nenhum pagamento encontrado.</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto pb-2">
+            <div className="flex h-44 items-end gap-2" style={{ minWidth: chronological.length * 64 }}>
+              {chronological.map((b) => {
+                const selected = selectedMonth === b.key;
+                return (
+                  <button
+                    key={b.key}
+                    type="button"
+                    onClick={() => setSelectedMonth(selected ? null : b.key)}
+                    title={`${b.label}: ${currencyFormatter.format(b.total)} (${b.payments.length} pagamentos)`}
+                    className="flex h-full w-14 shrink-0 flex-col items-center justify-end gap-1"
+                  >
+                    <span className="text-[10px] font-medium text-gray-600">{currencyFormatter.format(b.total).replace("R$", "").trim()}</span>
+                    <span
+                      className={`w-full rounded-t-md ${selected ? "bg-brand-dark" : "bg-brand"} ${
+                        selectedMonth && !selected ? "opacity-40" : ""
+                      }`}
+                      style={{ height: `${Math.max(4, Math.round((b.total / maxTotal) * 100))}px` }}
+                    />
+                    <span className="text-[10px] text-gray-500">
+                      {b.label.slice(0, 3)}/{b.year.slice(2)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {listBuckets.map((b) => {
+              const open = isOpen(b);
+              return (
+                <div key={b.key} className="rounded-xl border border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => toggleMonth(b)}
+                    className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+                  >
+                    <span className="text-sm font-medium text-gray-800">
+                      {open ? "▾" : "▸"} {b.label}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {b.payments.length} pagamento{b.payments.length === 1 ? "" : "s"} ·{" "}
+                      <span className="font-semibold text-brand-dark">{currencyFormatter.format(b.total)}</span>
+                    </span>
+                  </button>
+                  {open && (
+                    <ul className="divide-y divide-gray-50 border-t border-gray-100">
+                      {b.payments.map((p) => {
+                        const name = p.contactName?.trim() || `+${p.phoneNumber}`;
+                        const plan = p.planType ? PLAN_TYPE_LABELS[p.planType as PlanType] ?? p.planType : null;
+                        const method = p.paymentMethod ? PAYMENT_METHOD_LABELS[p.paymentMethod as PaymentMethod] ?? p.paymentMethod : null;
+                        return (
+                          <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                            <div className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => navigate("/inbox", { state: { contactId: p.contactId } })}
+                                className="truncate text-left text-sm font-medium text-gray-800 hover:text-brand-dark hover:underline"
+                                title="Ir para a Caixa de Entrada"
+                              >
+                                {name}
+                              </button>
+                              <p className="text-xs text-gray-400">
+                                {dateFormatter.format(new Date(p.paidAt))}
+                                {plan ? ` · ${plan}` : ""}
+                                {method ? ` · ${method}` : ""}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-sm font-medium text-brand-dark">{currencyFormatter.format(p.value)}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -492,49 +725,6 @@ export function DashboardPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel title="Pagamentos recentes" noPadding>
-          {data.recentPayments.length === 0 ? (
-            <p className="p-5 text-sm text-gray-400">Nenhum pagamento registrado ainda.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
-                    <th className="px-5 py-2 font-medium">Contato</th>
-                    <th className="px-5 py-2 font-medium">Etapa</th>
-                    <th className="px-5 py-2 font-medium">Dias na etapa</th>
-                    <th className="px-5 py-2 font-medium">Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.recentPayments.map((p) => {
-                    const name = p.contactName?.trim() || `+${p.phoneNumber}`;
-                    return (
-                      <tr key={p.id} className="border-t border-gray-100">
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-3">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
-                              {name.charAt(0).toUpperCase()}
-                            </span>
-                            <div>
-                              <p className="font-medium text-gray-800">{name}</p>
-                              <p className="text-xs text-gray-400">{dateFormatter.format(new Date(p.paidAt))}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3 text-gray-600">{p.stageName}</td>
-                        <td className="px-5 py-3 text-gray-600">
-                          {p.daysInStage == null ? "—" : `${Math.max(0, Math.round(p.daysInStage))}d`}
-                        </td>
-                        <td className="px-5 py-3 font-medium text-brand-dark">{currencyFormatter.format(p.value)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
 
         <Panel title="Cohort por mês de chegada" subtitle="Toque na lupa para ver a origem dos leads">
           {data.cohorts.length > 1 && (
