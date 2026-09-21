@@ -387,6 +387,9 @@ const addDealPaymentSchema = z.object({
   value: z.number().min(0),
   planType: z.enum(PLAN_TYPES).nullable().optional(),
   paymentMethod: z.enum(PAYMENT_METHODS).nullable().optional(),
+  // Only sent when the payment is being recorded after the fact (e.g. a renewal launched from
+  // Contatos days later) — omitted means "now", same as the conversation panel.
+  paidAt: z.string().datetime().optional(),
 });
 
 // A patient can pay more than once over time (renewals, top-ups), so each entry from the
@@ -406,6 +409,7 @@ export async function addDealPayment(req: Request, res: Response) {
       value: input.value,
       planType: input.planType ?? null,
       paymentMethod: input.paymentMethod ?? null,
+      ...(input.paidAt ? { paidAt: new Date(input.paidAt) } : {}),
     },
   });
 

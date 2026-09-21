@@ -4,6 +4,8 @@ import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
 import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
 import { Icon } from "../components/Icon";
+import { ContactPaymentModal } from "../components/ContactPaymentModal";
+import { useAuth } from "../context/AuthContext";
 
 interface Tag {
   id: string;
@@ -22,6 +24,10 @@ interface Contact {
 
 export function ContactsPage() {
   const navigate = useNavigate();
+  const { organization } = useAuth();
+  // The payment endpoint lives under the Funil (kanban) module, so gate the button the same way.
+  const canLaunchPayment = organization?.allowedModules.includes("kanban") ?? false;
+  const [paymentFor, setPaymentFor] = useState<Contact | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -232,6 +238,7 @@ export function ContactsPage() {
               <th className="px-5 py-3 font-medium">Contato</th>
               <th className="px-5 py-3 font-medium">Telefone</th>
               <th className="px-5 py-3 font-medium">Abas</th>
+              {canLaunchPayment && <th className="px-5 py-3 font-medium">Lançamento</th>}
               <th className="px-5 py-3 font-medium"></th>
             </tr>
           </thead>
@@ -288,6 +295,17 @@ export function ContactsPage() {
                     ))}
                   </div>
                 </td>
+                {canLaunchPayment && (
+                  <td className="px-5 py-3">
+                    <button
+                      onClick={() => setPaymentFor(contact)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-brand/40 px-2.5 py-1 text-xs font-medium text-brand-dark hover:bg-brand/10"
+                    >
+                      <Icon name="cash" className="h-3.5 w-3.5" />
+                      Financeiro
+                    </button>
+                  </td>
+                )}
                 <td className="px-5 py-3 text-right">
                   <button
                     disabled={!contact.hasConversation}
@@ -303,7 +321,7 @@ export function ContactsPage() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-400">
+                <td colSpan={canLaunchPayment ? 5 : 4} className="px-4 py-6 text-center text-sm text-gray-400">
                   Nenhum contato encontrado.
                 </td>
               </tr>
@@ -311,6 +329,12 @@ export function ContactsPage() {
           </tbody>
         </table>
       </div>
+      {paymentFor && (
+        <ContactPaymentModal
+          contact={{ id: paymentFor.id, label: contactLabel(paymentFor), phoneNumber: paymentFor.phoneNumber }}
+          onClose={() => setPaymentFor(null)}
+        />
+      )}
     </div>
   );
 }
