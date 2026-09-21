@@ -461,3 +461,31 @@ export async function getChannelLeads(req: Request, res: Response) {
     })),
   );
 }
+
+// Behind the "Pacientes Ativos" / "Pacientes Vencidas" cards: one row per deal in a stage with
+// that role, the same set the card's count is taken from.
+export async function getPatientsByRole(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const role = req.query.role;
+  if (role !== "ACTIVE_PATIENT" && role !== "LOST_PATIENT") return res.status(400).json({ error: "invalid_role" });
+
+  const deals = await prisma.deal.findMany({
+    where: { organizationId, stage: { role } },
+    select: {
+      id: true,
+      stage: { select: { name: true } },
+      contact: { select: { id: true, name: true, phoneNumber: true } },
+    },
+  });
+  res.json(
+    deals
+      .map((d) => ({
+        dealId: d.id,
+        contactId: d.contact.id,
+        name: d.contact.name,
+        phoneNumber: d.contact.phoneNumber,
+        stageName: d.stage.name,
+      }))
+      .sort((a, b) => (a.name?.trim() || a.phoneNumber).localeCompare(b.name?.trim() || b.phoneNumber, "pt-BR")),
+  );
+}

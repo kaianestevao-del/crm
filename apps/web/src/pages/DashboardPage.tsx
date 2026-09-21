@@ -122,6 +122,95 @@ function ChannelLeads({ month, channel }: { month: string; channel: string }) {
   );
 }
 
+interface PatientRow {
+  dealId: string;
+  contactId: string;
+  name: string | null;
+  phoneNumber: string;
+  stageName: string;
+}
+
+type PatientRole = "ACTIVE_PATIENT" | "LOST_PATIENT";
+
+function PatientsModal({ role, onClose }: { role: PatientRole; onClose: () => void }) {
+  const navigate = useNavigate();
+  const [patients, setPatients] = useState<PatientRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    api
+      .get("/dashboard/patients", { params: { role } })
+      .then((res) => setPatients(res.data))
+      .catch(() => setFailed(true));
+  }, [role]);
+
+  const term = search.trim().toLowerCase();
+  const digits = term.replace(/\D/g, "");
+  const filtered = (patients ?? []).filter(
+    (p) => !term || (p.name ?? "").toLowerCase().includes(term) || (digits && p.phoneNumber.includes(digits)),
+  );
+  const title = role === "ACTIVE_PATIENT" ? "Pacientes Ativos" : "Pacientes Vencidas";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <p className="text-sm font-semibold text-gray-900">
+            {title}
+            {patients && <span className="ml-1.5 font-normal text-gray-400">({patients.length})</span>}
+          </p>
+          <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100" aria-label="Fechar">
+            ✕
+          </button>
+        </div>
+        <div className="border-b border-gray-100 px-5 py-3">
+          <div className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2">
+            <span aria-hidden>🔍</span>
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar pelo nome ou telefone"
+              className="w-full text-sm outline-none"
+            />
+          </div>
+        </div>
+        <div className="overflow-y-auto">
+          {failed ? (
+            <p className="p-5 text-sm text-red-500">Não foi possível carregar a lista.</p>
+          ) : !patients ? (
+            <p className="p-5 text-sm text-gray-400">Carregando...</p>
+          ) : filtered.length === 0 ? (
+            <p className="p-5 text-sm text-gray-400">Nenhuma paciente encontrada.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {filtered.map((p) => (
+                <li key={p.dealId} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-800">{p.name?.trim() || `+${p.phoneNumber}`}</p>
+                    <p className="text-xs text-gray-400">{p.stageName}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/inbox", { state: { contactId: p.contactId } })}
+                    className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-dark"
+                  >
+                    Ir para a Caixa de Entrada
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface DashboardSummary {
   // Optional: a web build can be live before the API that produces it — never crash on absence.
   funnel?: MessageFunnel;
@@ -180,15 +269,26 @@ function KpiCard({
   value,
   icon,
   tone,
+  onClick,
 }: {
   label: string;
   value: string;
   icon: IconName;
   tone: keyof typeof tones;
+  onClick?: () => void;
 }) {
   const t = tones[tone];
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+    <div
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      title={onClick ? "Ver lista" : undefined}
+      className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md ${
+        onClick ? "cursor-pointer" : ""
+      }`}
+    >
       <div className="flex items-start justify-between">
         <p className="text-xs font-medium text-gray-500">{label}</p>
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${t.badge}`}>
@@ -196,6 +296,7 @@ function KpiCard({
         </span>
       </div>
       <p className={`mt-3 text-2xl font-semibold ${t.value}`}>{value}</p>
+      {onClick && <p className="mt-1 text-[11px] text-gray-400">Clique para ver a lista</p>}
     </div>
   );
 }
@@ -243,6 +344,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [expandedCohort, setExpandedCohort] = useState<string | null>(null);
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  const [patientsModal, setPatientsModal] = useState<PatientRole | null>(null);
   const [yearFilter, setYearFilter] = useState<string>("all");
 
   useEffect(() => {
@@ -255,9 +357,9 @@ export function DashboardPage() {
   if (loading) return <div className="p-6 text-sm text-gray-500">Carregando dashboard...</div>;
   if (!data) return <div className="p-6 text-sm text-gray-500">Não foi possível carregar o dashboard.</div>;
 
-  const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones }[] = [
-    { label: "Pacientes Ativos", value: String(data.patients.active), icon: "users", tone: "emerald" },
-    { label: "Pacientes Vencidas", value: String(data.patients.vencida), icon: "alert", tone: "red" },
+  const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones; onClick?: () => void }[] = [
+    { label: "Pacientes Ativos", value: String(data.patients.active), icon: "users", tone: "emerald", onClick: () => setPatientsModal("ACTIVE_PATIENT") },
+    { label: "Pacientes Vencidas", value: String(data.patients.vencida), icon: "alert", tone: "red", onClick: () => setPatientsModal("LOST_PATIENT") },
     { label: "Tempo médio de resposta", value: formatSeconds(data.avgResponseSeconds), icon: "clock", tone: "brand" },
     {
       label: "Tempo médio até 1º pagamento",
@@ -524,6 +626,7 @@ export function DashboardPage() {
           )}
         </Panel>
       </div>
+      {patientsModal && <PatientsModal role={patientsModal} onClose={() => setPatientsModal(null)} />}
     </div>
   );
 }

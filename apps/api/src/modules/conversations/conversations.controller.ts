@@ -54,7 +54,22 @@ export async function openConversationByContact(req: Request, res: Response) {
     where: { organizationId, contactId },
     orderBy: { lastMessageAt: "desc" },
   });
-  if (!conversation) throw new HttpError(404, "conversation_not_found");
+  if (!conversation) {
+    // Contacts bulk-imported with a historical payment have no conversation at all — create an
+    // empty one on the org's connected session (same rule as startConversation) so the
+    // attendant can still open them, e.g. to move the deal along the funnel.
+    const contact = await prisma.contact.findFirst({ where: { id: contactId, organizationId }, select: { id: true } });
+    if (!contact) throw new HttpError(404, "contact_not_found");
+    const session = await prisma.whatsappSession.findFirst({
+      where: { organizationId, status: "CONNECTED", archivedAt: null },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!session) throw new HttpError(400, "no_connected_whatsapp_session");
+    const created = await prisma.conversation.create({
+      data: { organizationId, whatsappSessionId: session.id, contactId: contact.id },
+    });
+    return res.json({ id: created.id });
+  }
   if (conversation.status !== "OPEN") {
     await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "OPEN" } });
   }
