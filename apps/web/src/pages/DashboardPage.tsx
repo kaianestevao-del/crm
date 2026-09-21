@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MONTH_NAMES_PT } from "@crm/shared";
 import { api } from "../lib/api";
 import { Icon, IconName } from "../components/Icon";
 
@@ -221,11 +222,28 @@ function Panel({
   );
 }
 
+const OLDER_COHORT_LABEL = "2025 ou antes";
+
+function cohortYear(label: string): string {
+  return label === OLDER_COHORT_LABEL ? OLDER_COHORT_LABEL : label.split("/")[1];
+}
+
+// Newest first, like "Pagamentos recentes"; the catch-all "2025 ou antes" bucket goes last.
+function compareCohortsNewestFirst(a: Cohort, b: Cohort): number {
+  if (a.label === OLDER_COHORT_LABEL) return 1;
+  if (b.label === OLDER_COHORT_LABEL) return -1;
+  const [aMonth, aYear] = a.label.split("/");
+  const [bMonth, bYear] = b.label.split("/");
+  if (aYear !== bYear) return Number(bYear) - Number(aYear);
+  return (MONTH_NAMES_PT as readonly string[]).indexOf(bMonth) - (MONTH_NAMES_PT as readonly string[]).indexOf(aMonth);
+}
+
 export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedCohort, setExpandedCohort] = useState<string | null>(null);
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  const [yearFilter, setYearFilter] = useState<string>("all");
 
   useEffect(() => {
     api
@@ -248,6 +266,14 @@ export function DashboardPage() {
       tone: "brand",
     },
   ];
+
+  const sortedCohorts = [...data.cohorts].sort(compareCohortsNewestFirst);
+  const cohortYears = Array.from(new Set(sortedCohorts.map((c) => cohortYear(c.label))));
+  // A year that no longer exists in the data (e.g. after a refresh) falls back to showing all.
+  const visibleCohorts =
+    yearFilter === "all" || !cohortYears.includes(yearFilter)
+      ? sortedCohorts
+      : sortedCohorts.filter((c) => cohortYear(c.label) === yearFilter);
 
   const revenueKpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones }[] = [
     { label: "Faturamento Total", value: currencyFormatter.format(data.revenue.total), icon: "cash", tone: "brand" },
@@ -409,11 +435,27 @@ export function DashboardPage() {
         </Panel>
 
         <Panel title="Cohort por mês de chegada" subtitle="Toque na lupa para ver a origem dos leads">
+          {data.cohorts.length > 1 && (
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {["all", ...cohortYears].map((y) => (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => setYearFilter(y)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    yearFilter === y ? "bg-brand text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {y === "all" ? "Todos" : y}
+                </button>
+              ))}
+            </div>
+          )}
           {data.cohorts.length === 0 ? (
             <p className="text-sm text-gray-400">Sem contatos registrados ainda.</p>
           ) : (
             <div className="space-y-4">
-              {data.cohorts.map((c) => {
+              {visibleCohorts.map((c) => {
                 const pct = c.totalLeads > 0 ? Math.round((c.convertedCount / c.totalLeads) * 100) : 0;
                 const isExpanded = expandedCohort === c.label;
                 const maxChannelLeads = Math.max(1, ...c.channels.map((ch) => ch.totalLeads));
