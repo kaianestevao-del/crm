@@ -404,7 +404,7 @@ export async function getChannelLeads(req: Request, res: Response) {
     `
     WITH month_tags AS (
       SELECT id, name FROM "Tag"
-      WHERE "organizationId" = $1 AND name ~ '^(${monthNamesPattern})/\d{4}$'
+      WHERE "organizationId" = $1 AND name ~ '^(${monthNamesPattern})/\\d{4}$'
     ),
     contact_month AS (
       SELECT DISTINCT ON (ct."contactId") ct."contactId", mt.name AS tag_name
