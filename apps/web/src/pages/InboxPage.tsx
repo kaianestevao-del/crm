@@ -279,6 +279,7 @@ export function InboxPage() {
   const [contactNameDraft, setContactNameDraft] = useState("");
   const [savingContactName, setSavingContactName] = useState(false);
   const [phoneCopied, setPhoneCopied] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -306,7 +307,14 @@ export function InboxPage() {
         await refreshConversations();
         await selectConversation(res.data.id);
       })
-      .catch(() => {});
+      .catch((err) => {
+        const code = err?.response?.data?.error;
+        setOpenError(
+          code === "no_connected_whatsapp_session"
+            ? "Não há WhatsApp conectado para abrir essa conversa."
+            : "Não foi possível abrir a conversa deste contato.",
+        );
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
@@ -573,6 +581,14 @@ export function InboxPage() {
             </button>
           </div>
         </div>
+        {openError && (
+          <div className="flex items-start justify-between gap-2 border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+            <span>{openError}</span>
+            <button type="button" onClick={() => setOpenError(null)} aria-label="Fechar aviso">
+              ✕
+            </button>
+          </div>
+        )}
         <div className="border-b border-gray-100 p-2">
           <div className="relative">
             <Icon name="search" className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />

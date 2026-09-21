@@ -308,10 +308,9 @@ export function ContactsPage() {
                 )}
                 <td className="px-5 py-3 text-right">
                   <button
-                    disabled={!contact.hasConversation}
                     onClick={() => navigate("/inbox", { state: { contactId: contact.id } })}
-                    title={contact.hasConversation ? "Ir para a conversa" : "Este contato ainda não trocou mensagens"}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline disabled:cursor-not-allowed disabled:text-gray-300 disabled:no-underline"
+                    title={contact.hasConversation ? "Ir para a conversa" : "Ainda sem conversa — abre uma conversa vazia"}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-dark hover:underline"
                   >
                     <Icon name="chat" className="h-3.5 w-3.5" />
                     Ir para Caixa de Entrada

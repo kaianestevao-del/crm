@@ -22,7 +22,8 @@ export function ContactPaymentModal({
   const [date, setDate] = useState(todayInputValue());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [markActive, setMarkActive] = useState(true);
+  const [done, setDone] = useState<null | "none" | "moved" | "no_stage">(null);
 
   async function submit() {
     // "1.200,50" (pt-BR: dot = thousands) and "1200.50" / "1200,50" all read as intended.
@@ -39,6 +40,7 @@ export function ContactPaymentModal({
         value: parsed,
         planType: planType || null,
         paymentMethod: paymentMethod || null,
+        markActive,
       };
       // Today -> let the server stamp "now"; a past day -> midday local so the month never
       // drifts across a timezone boundary.
@@ -46,8 +48,8 @@ export function ContactPaymentModal({
         const [y, m, d] = date.split("-").map(Number);
         body.paidAt = new Date(y, m - 1, d, 12).toISOString();
       }
-      await api.post(`/pipelines/contacts/${contact.id}/deal-payments`, body);
-      setDone(true);
+      const res = await api.post(`/pipelines/contacts/${contact.id}/deal-payments`, body);
+      setDone(res.data.activation ?? "none");
     } catch {
       setError("Não foi possível lançar o pagamento. Tente novamente.");
     } finally {
@@ -72,11 +74,17 @@ export function ContactPaymentModal({
           </button>
         </div>
 
-        {done ? (
+        {done !== null ? (
           <div>
             <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
               Pagamento lançado! Ele já aparece na Caixa do dashboard.
+              {done === "moved" && " A paciente foi movida para Paciente Ativa."}
             </p>
+            {done === "no_stage" && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                Nenhuma etapa do funil está marcada como “Paciente Ativa” (Configurações), então a etapa não foi alterada.
+              </p>
+            )}
             <div className="mt-4 flex justify-end">
               <button type="button" onClick={onClose} className="rounded-md bg-brand-dark px-3 py-1.5 text-xs font-medium text-white">
                 Fechar
@@ -124,6 +132,10 @@ export function ContactPaymentModal({
               onChange={(e) => setDate(e.target.value)}
               className={inputClass}
             />
+            <label className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+              <input type="checkbox" checked={markActive} onChange={(e) => setMarkActive(e.target.checked)} />
+              Marcar como Paciente Ativa no funil
+            </label>
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={onClose} className="px-2 py-1 text-xs text-gray-500 hover:underline">

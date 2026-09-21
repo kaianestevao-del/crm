@@ -390,6 +390,9 @@ const addDealPaymentSchema = z.object({
   // Only sent when the payment is being recorded after the fact (e.g. a renewal launched from
   // Contatos days later) — omitted means "now", same as the conversation panel.
   paidAt: z.string().datetime().optional(),
+  // Also move the deal to the pipeline's ACTIVE_PATIENT-role stage (a renewal makes the patient
+  // active again). Opt-in so the conversation panel's existing behavior is unchanged.
+  markActive: z.boolean().optional(),
 });
 
 // A patient can pay more than once over time (renewals, top-ups), so each entry from the
@@ -413,6 +416,31 @@ export async function addDealPayment(req: Request, res: Response) {
     },
   });
 
+  // "none" = not asked, "moved" = now in the active stage (or already was), "no_stage" = asked
+  // but this pipeline has no stage with the Paciente Ativa role configured.
+  let activation: "none" | "moved" | "no_stage" = "none";
+  if (input.markActive) {
+    const activeStage = await prisma.pipelineStage.findFirst({
+      where: { pipelineId: deal.pipelineId, role: "ACTIVE_PATIENT" },
+      orderBy: { order: "asc" },
+    });
+    if (!activeStage) {
+      activation = "no_stage";
+    } else {
+      activation = "moved";
+      if (deal.stageId !== activeStage.id) {
+        const lastInStage = await prisma.deal.findFirst({ where: { stageId: activeStage.id }, orderBy: { order: "desc" } });
+        await prisma.$transaction(async (tx) => {
+          await tx.deal.update({
+            where: { id: deal.id },
+            data: { stageId: activeStage.id, order: (lastInStage?.order ?? -1) + 1 },
+          });
+          await transitionDealStage(tx, deal.id, deal.stageId, activeStage.id);
+        });
+      }
+    }
+  }
+
   const updated = await prisma.deal.findUniqueOrThrow({
     where: { id: deal.id },
     select: {
@@ -424,7 +452,7 @@ export async function addDealPayment(req: Request, res: Response) {
       },
     },
   });
-  res.status(201).json(updated);
+  res.status(201).json({ ...updated, activation });
 }
 
 export async function deleteDealPayment(req: Request, res: Response) {
