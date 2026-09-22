@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
@@ -281,6 +281,7 @@ export function InboxPage() {
   const [phoneCopied, setPhoneCopied] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const audioRecorder = useAudioRecorder();
@@ -380,6 +381,16 @@ export function InboxPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Grows with the text up to a cap, then scrolls internally — same feel as WhatsApp's own
+  // composer. Recalculated on every keystroke and whenever the draft is cleared/replaced
+  // programmatically (quick replies, emoji picker, sending).
+  useEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft]);
+
   async function selectConversation(id: string) {
     setSelectedId(id);
     setShowQuickReplies(false);
@@ -394,8 +405,7 @@ export function InboxPage() {
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)));
   }
 
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
+  async function sendDraft() {
     if (!selectedId || !draft.trim()) return;
     setSending(true);
     try {
@@ -404,6 +414,20 @@ export function InboxPage() {
       setDraft("");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleSend(e: FormEvent) {
+    e.preventDefault();
+    await sendDraft();
+  }
+
+  // Enter sends (matching WhatsApp's own desktop convention); Shift+Enter inserts a newline,
+  // which a plain <input> can never do regardless of the key combo — hence the <textarea> below.
+  function handleDraftKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendDraft();
     }
   }
 
@@ -983,11 +1007,14 @@ export function InboxPage() {
                 >
                   😊
                 </button>
-                <input
+                <textarea
+                  ref={draftRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Digite uma mensagem..."
-                  className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  onKeyDown={handleDraftKeyDown}
+                  placeholder="Digite uma mensagem... (Shift+Enter para pular linha)"
+                  rows={1}
+                  className="max-h-40 flex-1 resize-none overflow-y-auto rounded-xl border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:border-brand focus:outline-none"
                 />
                 <button
                   type="submit"
