@@ -153,6 +153,10 @@ function TemplateForm({
             <option value="UTILITY">Utility (transacional, mais barato)</option>
             <option value="MARKETING">Marketing (promocional)</option>
           </select>
+          <p className="mt-1 text-xs text-gray-400">
+            Convite, promoção ou "que tal começar..." é Marketing — se marcar Utility, a Meta reclassifica e cobra como Marketing
+            mesmo assim.
+          </p>
         </div>
       </div>
 
@@ -249,6 +253,7 @@ export function TemplatesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [recategorized, setRecategorized] = useState<{ id: string; name: string; from: TemplateCategory; to: TemplateCategory }[]>([]);
 
   async function refresh() {
     const res = await api.get("/templates");
@@ -257,6 +262,15 @@ export function TemplatesPage() {
 
   useEffect(() => {
     refresh();
+    // Pulls status + category from Meta for every submitted template — Meta may have
+    // re-classified one (typically Utility → Marketing), which changes what it's billed as.
+    api
+      .post("/templates/sync-all")
+      .then((res) => {
+        setRecategorized(res.data.recategorized ?? []);
+        return refresh();
+      })
+      .catch(() => {});
   }, []);
 
   async function submitForApproval(id: string) {
@@ -322,6 +336,23 @@ export function TemplatesPage() {
         )}
       </div>
 
+      {recategorized.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-semibold">A Meta mudou a categoria destes templates:</p>
+          <ul className="mt-1 list-disc pl-4">
+            {recategorized.map((r) => (
+              <li key={r.id}>
+                <span className="font-mono">{r.name}</span>: {r.from} → <strong>{r.to}</strong>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">
+            A Meta passa a cobrar pela categoria nova. Textos de convite ou promoção são sempre Marketing — Utility só vale para avisos
+            sobre algo que o paciente já contratou (confirmação, lembrete de consulta).
+          </p>
+        </div>
+      )}
+
       {formMode && (
         <TemplateForm
           editingId={formMode.type === "edit" ? formMode.template.id : undefined}
@@ -357,7 +388,13 @@ export function TemplatesPage() {
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm font-medium text-gray-900">{t.name}</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[t.status]}`}>{STATUS_LABEL[t.status]}</span>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{t.category}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs ${
+                    t.category === "MARKETING" ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {t.category === "MARKETING" ? "Marketing (mais caro)" : "Utility"}
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 {(t.status === "DRAFT" || t.status === "REJECTED") && (

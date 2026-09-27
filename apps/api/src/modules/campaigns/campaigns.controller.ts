@@ -207,11 +207,16 @@ export async function getCampaign(req: Request, res: Response) {
   // A DRAFT never got a locked-in estimatedCost (that only happens at send time) — compute a
   // live preview from the current price table so the "Enviar campanha" action on an
   // already-created draft can show a cost before confirming, same as right after creation.
+  const org = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
+  const pricePerMessage = priceForCategory(org, campaign.template.category);
   let previewCost: number | null = null;
   if (campaign.status === "DRAFT") {
-    const org = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
-    previewCost = recipients.length * priceForCategory(org, campaign.template.category);
+    previewCost = recipients.length * pricePerMessage;
   }
+  // Meta bills per *delivered* message (a READ one was delivered too), at the template's
+  // current category — closer to the real charge than the send-time estimate once the
+  // delivery webhooks have come in.
+  const deliveredCount = (messageStatusCounts.DELIVERED ?? 0) + (messageStatusCounts.READ ?? 0);
 
   res.json({
     ...campaign,
@@ -220,6 +225,8 @@ export async function getCampaign(req: Request, res: Response) {
     messageStatusCounts,
     failureReasons,
     previewCost,
+    pricePerMessage,
+    deliveredCost: deliveredCount * pricePerMessage,
   });
 }
 

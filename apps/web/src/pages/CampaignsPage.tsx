@@ -49,6 +49,8 @@ interface CampaignDetail extends CampaignListItem {
   messageStatusCounts: Record<string, number>;
   failureReasons: { error: string; count: number }[];
   previewCost: number | null;
+  pricePerMessage: number;
+  deliveredCost: number;
 }
 
 interface CampaignEditData {
@@ -195,16 +197,21 @@ function ContactPicker({
   );
 }
 
+const MARKETING_WARNING =
+  "Este template é Marketing — a Meta cobra bem mais caro que Utility (cerca de 8×). Convites e promoções sempre são cobrados como Marketing.";
+
 function SendConfirmation({
   campaignId,
   recipientCount,
   previewCost,
+  category,
   onDone,
   onCancel,
 }: {
   campaignId: string;
   recipientCount: number;
   previewCost: number;
+  category: string;
   onDone: () => void;
   onCancel?: () => void;
 }) {
@@ -241,8 +248,13 @@ function SendConfirmation({
       <h2 className="mb-2 text-sm font-semibold text-gray-900">Confirmar disparo</h2>
       <p className="text-sm text-gray-700">
         <strong>{recipientCount}</strong> destinatário{recipientCount === 1 ? "" : "s"} × custo estimado por
-        mensagem = <strong>{money(previewCost)}</strong> (estimativa, pode variar do valor real cobrado pela Meta).
+        mensagem = <strong>≈ {money(previewCost)}</strong>
       </p>
+      <p className="mt-1 text-xs text-gray-500">
+        Categoria: <strong>{category === "MARKETING" ? "Marketing" : "Utility"}</strong>. Estimativa em reais — a Meta cobra em
+        dólar, só pelas mensagens entregues, então o valor final no cartão varia com o câmbio e com quantas forem entregues.
+      </p>
+      {category === "MARKETING" && <p className="mt-2 text-xs font-medium text-amber-700">{MARKETING_WARNING}</p>}
 
       <div className="mt-3">
         <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -307,7 +319,7 @@ function CampaignWizard({
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ id: string; recipientCount: number; previewCost: number } | null>(null);
+  const [preview, setPreview] = useState<{ id: string; recipientCount: number; previewCost: number; category: string } | null>(null);
 
   const approvedTemplates = templates.filter((t) => t.status === "APPROVED");
   const selectedTemplate = templates.find((t) => t.id === templateId);
@@ -367,7 +379,12 @@ function CampaignWizard({
     };
     try {
       const res = editing ? await api.patch(`/campaigns/${editing.id}`, payload) : await api.post("/campaigns", payload);
-      setPreview({ id: res.data.id, recipientCount: res.data.recipientCount, previewCost: res.data.previewCost });
+      setPreview({
+        id: res.data.id,
+        recipientCount: res.data.recipientCount,
+        previewCost: res.data.previewCost,
+        category: selectedTemplate?.category ?? "UTILITY",
+      });
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(
@@ -389,6 +406,7 @@ function CampaignWizard({
           campaignId={preview.id}
           recipientCount={preview.recipientCount}
           previewCost={preview.previewCost}
+          category={preview.category}
           onDone={onDone}
           onCancel={onCancel}
         />
@@ -426,6 +444,7 @@ function CampaignWizard({
         {approvedTemplates.length === 0 && (
           <p className="mt-1 text-xs text-amber-600">Nenhum template aprovado ainda — crie um em "Templates" e aguarde a aprovação da Meta.</p>
         )}
+        {selectedTemplate?.category === "MARKETING" && <p className="mt-1 text-xs text-amber-700">{MARKETING_WARNING}</p>}
       </div>
 
       {selectedTemplate && variableCount > 0 && (
@@ -605,6 +624,7 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
             campaignId={id}
             recipientCount={detail.recipientCount}
             previewCost={detail.previewCost ?? 0}
+            category={detail.template.category}
             onDone={() => {
               setShowSend(false);
               onChanged();
@@ -617,7 +637,7 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
     return (
       <div className="border-t border-gray-100 bg-gray-50 p-4 text-sm">
         <p className="text-gray-700">
-          {detail.recipientCount} destinatário{detail.recipientCount === 1 ? "" : "s"} · custo estimado {money(detail.previewCost)}
+          {detail.recipientCount} destinatário{detail.recipientCount === 1 ? "" : "s"} · custo estimado ≈ {money(detail.previewCost)}
         </p>
         <button
           onClick={() => setShowSend(true)}
@@ -650,8 +670,9 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
   const sent = detail.recipientStatusCounts.SENT ?? 0;
   const failed = detail.recipientStatusCounts.FAILED ?? 0;
   const pending = detail.recipientStatusCounts.PENDING ?? 0;
-  const delivered = detail.messageStatusCounts.DELIVERED ?? 0;
   const read = detail.messageStatusCounts.READ ?? 0;
+  // A read message was delivered too — Meta bills (and counts) both as delivered.
+  const delivered = (detail.messageStatusCounts.DELIVERED ?? 0) + read;
 
   return (
     <div className="grid grid-cols-2 gap-3 border-t border-gray-100 bg-gray-50 p-4 text-sm sm:grid-cols-5">
@@ -682,10 +703,19 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
         </div>
       )}
       <div>
-        <p className="text-xs text-gray-400">Custo estimado</p>
+        <p className="text-xs text-gray-400">Estimativa no envio</p>
         <p className="font-semibold">{money(detail.estimatedCost)}</p>
       </div>
-      {detail.failureReasons.length > 0 && (
+      <div>
+        <p className="text-xs text-gray-400">Custo pelas entregues</p>
+        <p className="font-semibold">≈ {money(detail.deliveredCost)}</p>
+      </div>
+      <p className="col-span-full text-xs text-gray-400">
+        A Meta cobra em dólar, só pelas mensagens entregues, como{" "}
+        {detail.template.category === "MARKETING" ? "Marketing" : "Utility"} ({money(detail.pricePerMessage)} por mensagem na
+        tabela do CRM). O valor em reais é aproximado — o cartão varia com o câmbio.
+      </p>
+      {detail.failureReasons?.length > 0 && (
         <div className="col-span-full rounded-xl border border-red-100 bg-red-50 p-3">
           <p className="mb-1 text-xs font-medium text-red-700">Motivo das falhas</p>
           <ul className="space-y-1">
@@ -720,7 +750,12 @@ export function CampaignsPage() {
 
   useEffect(() => {
     refreshCampaigns();
-    api.get("/templates").then((res) => setTemplates(res.data));
+    // Refreshes each template's category from Meta first — it may have re-classified a Utility
+    // template as Marketing, which changes the cost estimate.
+    api
+      .post("/templates/sync-all")
+      .catch(() => {})
+      .finally(() => api.get("/templates").then((res) => setTemplates(res.data)));
     api.get("/tags").then((res) => setTags(res.data));
     api.get("/whatsapp-labels").then((res) => setLabels(res.data));
     api.get("/contacts").then((res) => setContacts(res.data));

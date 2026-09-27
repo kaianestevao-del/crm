@@ -153,29 +153,58 @@ export async function submitTemplate(req: Request, res: Response) {
 }
 
 // Meta doesn't push approval/rejection to us — this is a manual "check now" the UI can call
-// (Templates page has an "Atualizar status" button), plus a periodic worker job for
-// templates the org never comes back to check on.
-export async function syncTemplateStatus(req: Request, res: Response) {
-  const organizationId = req.auth!.organizationId;
-  const template = await getOwnedTemplate(organizationId, req.params.id);
-  if (!template.metaTemplateId) throw new HttpError(400, "template_not_submitted");
-  const session = await getOwnedCloudApiSession(organizationId);
-
-  const res_ = await fetch(
-    `${CLOUD_API_BASE}/${template.metaTemplateId}?fields=status,rejected_reason`,
-    { headers: { Authorization: `Bearer ${session.cloudApiAccessToken}` } },
-  );
-  const data = (await res_.json()) as { status?: string; rejected_reason?: string };
+// (Templates page has an "Atualizar status" button). Also pulls the category: Meta routinely
+// re-classifies a template submitted as UTILITY into MARKETING when the copy is promotional,
+// and bills it as MARKETING from then on — without this, the campaign cost estimate keeps
+// using the (much cheaper) Utility price.
+async function syncTemplateWithMeta(
+  template: { id: string; metaTemplateId: string | null; category: TemplateCategory },
+  accessToken: string,
+) {
+  const res_ = await fetch(`${CLOUD_API_BASE}/${template.metaTemplateId}?fields=status,rejected_reason,category`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = (await res_.json()) as { status?: string; rejected_reason?: string; category?: string };
   if (!res_.ok || !data.status) throw new HttpError(400, "meta_template_status_check_failed");
+
+  const metaCategory = Object.values(TemplateCategory).find((c) => c === data.category);
+  const recategorizedFrom = metaCategory && metaCategory !== template.category ? template.category : null;
 
   const updated = await prisma.messageTemplate.update({
     where: { id: template.id },
     data: {
       status: data.status as "PENDING" | "APPROVED" | "REJECTED",
       rejectionReason: data.status === "REJECTED" ? data.rejected_reason ?? null : null,
+      ...(metaCategory ? { category: metaCategory } : {}),
     },
   });
-  res.json(updated);
+  return { ...updated, recategorizedFrom };
+}
+
+export async function syncTemplateStatus(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const template = await getOwnedTemplate(organizationId, req.params.id);
+  if (!template.metaTemplateId) throw new HttpError(400, "template_not_submitted");
+  const session = await getOwnedCloudApiSession(organizationId);
+  res.json(await syncTemplateWithMeta(template, session.cloudApiAccessToken));
+}
+
+// Called when the Templates/Campaigns pages open, so a category Meta changed after approval
+// shows up before the attendant builds a campaign on it. One failing template (e.g. deleted on
+// Meta's side) doesn't block the rest.
+export async function syncAllTemplates(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const session = await getOwnedCloudApiSession(organizationId);
+  const templates = await prisma.messageTemplate.findMany({
+    where: { organizationId, metaTemplateId: { not: null } },
+  });
+  const results = await Promise.allSettled(templates.map((t) => syncTemplateWithMeta(t, session.cloudApiAccessToken)));
+  const recategorized = results.flatMap((r) =>
+    r.status === "fulfilled" && r.value.recategorizedFrom
+      ? [{ id: r.value.id, name: r.value.name, from: r.value.recategorizedFrom, to: r.value.category }]
+      : [],
+  );
+  res.json({ recategorized });
 }
 
 export async function deleteTemplate(req: Request, res: Response) {
