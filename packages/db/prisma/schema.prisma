@@ -642,6 +642,10 @@ model Campaign {
   audienceTagId    String?
   audienceLabelId  String?
   audienceContactIds String[] @default([])
+  // One entry per {{1}}, {{2}}... of the template, in order — Meta rejects the whole send
+  // (#132000) if the count doesn't match. Each may contain contact tags ({{nome}},
+  // {{telefone}}), resolved per recipient at dispatch time (see renderCampaignParam).
+  templateParams String[] @default([])
   // Locked in at send time (recipientCount × the org's price-per-message at that moment), so
   // editing the price table later doesn't retroactively change what a past campaign "cost".
   estimatedCost Decimal?

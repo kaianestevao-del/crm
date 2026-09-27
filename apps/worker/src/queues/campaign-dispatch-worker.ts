@@ -1,6 +1,13 @@
 import { Queue, Worker } from "bullmq";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType } from "@crm/db";
-import { QUEUE_CAMPAIGN_DISPATCH, QUEUE_OUTBOUND_MESSAGES, CampaignDispatchJob, OutboundMessageJob } from "@crm/shared";
+import {
+  QUEUE_CAMPAIGN_DISPATCH,
+  QUEUE_OUTBOUND_MESSAGES,
+  CampaignDispatchJob,
+  OutboundMessageJob,
+  fillTemplateBody,
+  renderCampaignParam,
+} from "@crm/shared";
 import { createRedisClient } from "../redis";
 import { publishRealtimeEvent } from "../pubsub";
 
@@ -32,6 +39,17 @@ async function dispatchCampaign(campaignId: string) {
   });
 
   for (const recipient of recipients) {
+    const templateParams = campaign.templateParams.map((value) => renderCampaignParam(value, recipient.contact));
+    // e.g. "{{nome}}" alone for a contact saved without a name — Meta would reject the empty
+    // parameter anyway, so fail this recipient up front with a reason the attendant can act on.
+    if (templateParams.some((p) => !p)) {
+      await prisma.campaignRecipient.update({
+        where: { id: recipient.id },
+        data: { status: "FAILED", error: "template_param_empty" },
+      });
+      continue;
+    }
+
     const conversation = await prisma.conversation.upsert({
       where: { whatsappSessionId_contactId: { whatsappSessionId: campaign.whatsappSessionId, contactId: recipient.contactId } },
       update: {},
@@ -42,7 +60,7 @@ async function dispatchCampaign(campaignId: string) {
         conversationId: conversation.id,
         direction: MessageDirection.OUTBOUND,
         type: MessageType.TEXT,
-        content: campaign.template.bodyText,
+        content: fillTemplateBody(campaign.template.bodyText, templateParams),
         status: MessageStatus.PENDING,
       },
     });
@@ -56,7 +74,18 @@ async function dispatchCampaign(campaignId: string) {
       waJid: recipient.contact.waJid,
       templateName: campaign.template.name,
       templateLanguage: campaign.template.language,
+      templateParams,
       campaignRecipientId: recipient.id,
+    });
+  }
+
+  // If every recipient failed up front, no outbound job will ever run to close the campaign
+  // (that normally happens in outbound-messages-worker's updateCampaignRecipient).
+  const stillPending = await prisma.campaignRecipient.count({ where: { campaignId: campaign.id, status: "PENDING" } });
+  if (stillPending === 0) {
+    await prisma.campaign.updateMany({
+      where: { id: campaign.id, status: "SENDING" },
+      data: { status: "DONE", finishedAt: new Date() },
     });
   }
 

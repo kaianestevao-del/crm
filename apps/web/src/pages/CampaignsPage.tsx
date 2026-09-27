@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
+import { CAMPAIGN_PARAM_TAGS, fillTemplateBody, renderCampaignParam } from "@crm/shared";
 
 type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "DONE" | "FAILED";
 type AudienceType = "ALL" | "TAG" | "LABEL" | "CONTACTS";
@@ -10,6 +11,9 @@ interface Template {
   name: string;
   category: "MARKETING" | "UTILITY";
   status: string;
+  bodyText: string;
+  variableCount: number;
+  bodyExamples: string[];
 }
 
 interface Tag {
@@ -43,6 +47,7 @@ interface CampaignDetail extends CampaignListItem {
   recipientCount: number;
   recipientStatusCounts: Record<string, number>;
   messageStatusCounts: Record<string, number>;
+  failureReasons: { error: string; count: number }[];
   previewCost: number | null;
 }
 
@@ -54,6 +59,7 @@ interface CampaignEditData {
   audienceTagId: string | null;
   audienceLabelId: string | null;
   audienceContactIds: string[];
+  templateParams: string[];
 }
 
 const STATUS_LABEL: Record<CampaignStatus, string> = {
@@ -75,6 +81,33 @@ const STATUS_STYLE: Record<CampaignStatus, string> = {
 function money(v: string | number | null) {
   if (v === null) return "—";
   return Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// The raw error stored per recipient is either our own code or "cloud_api_send_failed:" + Meta's
+// JSON error body — pulled apart here into something the attendant can act on.
+function describeFailure(raw: string): string {
+  if (raw === "template_param_empty") return "Variável do template ficou vazia (ex: {{nome}} em contato sem nome).";
+  const code = raw.match(/"code":\s*(\d+)/)?.[1];
+  switch (code) {
+    case "132000":
+    case "132012":
+      return "Variáveis do template não batem com o que a Meta espera.";
+    case "132001":
+      return "Template não existe na Meta com esse nome/idioma.";
+    case "131026":
+      return "Número inválido ou sem WhatsApp.";
+    case "131049":
+      return "A Meta limitou mensagens de marketing para este contato (engajamento baixo).";
+    case "131047":
+      return "Fora da janela de 24h.";
+    case "190":
+      return "Token de acesso da Meta expirado — atualize em Conexão WhatsApp.";
+    case "131056":
+    case "130429":
+      return "Limite de envio da Meta atingido — tente mais tarde.";
+  }
+  const metaMessage = raw.match(/"message":\s*"([^"]+)"/)?.[1];
+  return metaMessage ?? raw;
 }
 
 function formatDateTime(iso: string) {
@@ -191,7 +224,13 @@ function SendConfirmation({
       onDone();
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(message === "scheduled_for_must_be_in_the_future" ? "Escolha uma data/hora no futuro." : "Não foi possível disparar.");
+      setError(
+        message === "scheduled_for_must_be_in_the_future"
+          ? "Escolha uma data/hora no futuro."
+          : message === "template_params_required"
+            ? "Preencha as variáveis do template — clique em Editar na campanha."
+            : "Não foi possível disparar.",
+      );
     } finally {
       setSending(false);
     }
@@ -263,6 +302,7 @@ function CampaignWizard({
   const [audienceTagId, setAudienceTagId] = useState(editing?.audienceTagId ?? "");
   const [audienceLabelId, setAudienceLabelId] = useState(editing?.audienceLabelId ?? "");
   const [audienceContactIds, setAudienceContactIds] = useState<string[]>(editing?.audienceContactIds ?? []);
+  const [templateParams, setTemplateParams] = useState<string[]>(editing?.templateParams ?? []);
   const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -270,6 +310,22 @@ function CampaignWizard({
   const [preview, setPreview] = useState<{ id: string; recipientCount: number; previewCost: number } | null>(null);
 
   const approvedTemplates = templates.filter((t) => t.status === "APPROVED");
+  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const variableCount = selectedTemplate?.variableCount ?? 0;
+  // Always sized to the selected template — a draft saved before variables were supported (or
+  // whose template changed) comes back with fewer entries than the template needs.
+  const params = Array.from({ length: variableCount }, (_, i) => templateParams[i] ?? "");
+  const paramsFilled = params.every((p) => p.trim());
+
+  function selectTemplate(id: string) {
+    setTemplateId(id);
+    const count = templates.find((t) => t.id === id)?.variableCount ?? 0;
+    setTemplateParams((prev) => Array.from({ length: count }, (_, i) => prev[i] ?? ""));
+  }
+
+  function setParam(index: number, value: string) {
+    setTemplateParams(params.map((p, i) => (i === index ? value : p)));
+  }
   const allContacts = extraContacts.length
     ? [...contacts, ...extraContacts.filter((c) => !contacts.some((x) => x.id === c.id))]
     : contacts;
@@ -294,7 +350,7 @@ function CampaignWizard({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !templateId) return;
+    if (!name.trim() || !templateId || !paramsFilled) return;
     if (audienceType === "TAG" && !audienceTagId) return;
     if (audienceType === "LABEL" && !audienceLabelId) return;
     if (audienceType === "CONTACTS" && audienceContactIds.length === 0) return;
@@ -307,6 +363,7 @@ function CampaignWizard({
       audienceTagId: audienceType === "TAG" ? audienceTagId : undefined,
       audienceLabelId: audienceType === "LABEL" ? audienceLabelId : undefined,
       audienceContactIds: audienceType === "CONTACTS" ? audienceContactIds : undefined,
+      templateParams: params,
     };
     try {
       const res = editing ? await api.patch(`/campaigns/${editing.id}`, payload) : await api.post("/campaigns", payload);
@@ -316,7 +373,9 @@ function CampaignWizard({
       setError(
         message === "no_recipients_found"
           ? "Nenhum contato encontrado para esse público."
-          : `Não foi possível ${editing ? "salvar" : "criar"} a campanha.`,
+          : message === "template_params_required"
+            ? "Preencha todas as variáveis do template."
+            : `Não foi possível ${editing ? "salvar" : "criar"} a campanha.`,
       );
     } finally {
       setSaving(false);
@@ -354,7 +413,7 @@ function CampaignWizard({
         <label className="mb-1 block text-xs font-medium text-gray-500">Template (só aprovados)</label>
         <select
           value={templateId}
-          onChange={(e) => setTemplateId(e.target.value)}
+          onChange={(e) => selectTemplate(e.target.value)}
           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
         >
           <option value="">Selecione...</option>
@@ -368,6 +427,60 @@ function CampaignWizard({
           <p className="mt-1 text-xs text-amber-600">Nenhum template aprovado ainda — crie um em "Templates" e aguarde a aprovação da Meta.</p>
         )}
       </div>
+
+      {selectedTemplate && variableCount > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <p className="mb-1 text-sm font-semibold text-gray-900">O que vai em cada espaço do template</p>
+          <ul className="mb-3 list-disc space-y-0.5 pl-4 text-xs text-gray-600">
+            <li>
+              Clique em <strong>+ Primeiro nome</strong> pra colocar o nome de cada paciente automaticamente (vira {"{{nome}}"}).
+            </li>
+            <li>Qualquer outro texto (ex: segunda-feira) vai igual pra todos os pacientes desta campanha.</li>
+            <li>Todos os espaços são obrigatórios — sem eles a Meta recusa o envio.</li>
+          </ul>
+          <div className="space-y-2">
+            {params.map((value, i) => (
+              <div key={i}>
+                <div className="flex items-center gap-2">
+                  <span className="w-10 shrink-0 text-xs font-mono text-gray-500">{`{{${i + 1}}}`}</span>
+                  <input
+                    value={value}
+                    onChange={(e) => setParam(i, e.target.value)}
+                    placeholder={selectedTemplate.bodyExamples[i] ? `ex: ${selectedTemplate.bodyExamples[i]}` : ""}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  />
+                </div>
+                <div className="ml-12 mt-1 flex gap-2">
+                  {CAMPAIGN_PARAM_TAGS.map(({ tag, label }) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setParam(i, `${value}${tag}`)}
+                      className="text-xs font-medium text-brand-dark hover:underline"
+                    >
+                      + {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+            <p className="mb-1 text-xs font-medium text-gray-500">Prévia — como chega para uma paciente chamada Maria Silva</p>
+            <p className="whitespace-pre-wrap text-sm text-gray-700">
+              {fillTemplateBody(
+                selectedTemplate.bodyText,
+                params.map((p, i) => renderCampaignParam(p, { name: "Maria Silva", phoneNumber: "5511999998888" }) || `{{${i + 1}}}`),
+              )}
+            </p>
+          </div>
+          {params.some((p) => p.trim() === "{{nome}}") && (
+            <p className="mt-2 text-xs text-amber-600">
+              Contatos sem nome salvo vão falhar numa variável que é só {"{{nome}}"} — ex: use "Olá {"{{nome}}"}" no lugar.
+            </p>
+          )}
+        </div>
+      )}
 
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-500">Público</label>
@@ -436,6 +549,7 @@ function CampaignWizard({
             saving ||
             !name.trim() ||
             !templateId ||
+            !paramsFilled ||
             (audienceType === "CONTACTS" && audienceContactIds.length === 0)
           }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
@@ -571,6 +685,18 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
         <p className="text-xs text-gray-400">Custo estimado</p>
         <p className="font-semibold">{money(detail.estimatedCost)}</p>
       </div>
+      {detail.failureReasons.length > 0 && (
+        <div className="col-span-full rounded-xl border border-red-100 bg-red-50 p-3">
+          <p className="mb-1 text-xs font-medium text-red-700">Motivo das falhas</p>
+          <ul className="space-y-1">
+            {detail.failureReasons.map((f) => (
+              <li key={f.error} className="text-xs text-red-700" title={f.error}>
+                <strong>{f.count}×</strong> {describeFailure(f.error)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -623,6 +749,7 @@ export function CampaignsPage() {
         audienceTagId: c.audienceTagId,
         audienceLabelId: c.audienceLabelId,
         audienceContactIds: c.audienceContactIds ?? [],
+        templateParams: c.templateParams ?? [],
       },
     });
   }

@@ -36,6 +36,15 @@ async function resolveRecipients(
   return prisma.contact.findMany({ where: { organizationId } });
 }
 
+// Meta rejects every send (#132000) unless exactly one non-empty value is given per {{n}}
+// in the template body — checked here so the attendant finds out before dispatching, not
+// after every recipient comes back FAILED.
+function assertTemplateParams(template: { variableCount: number }, templateParams: string[]) {
+  if (templateParams.length !== template.variableCount || templateParams.some((p) => !p.trim())) {
+    throw new HttpError(400, "template_params_required");
+  }
+}
+
 function priceForCategory(org: { templatePriceMarketing: unknown; templatePriceUtility: unknown }, category: string) {
   return Number(category === "MARKETING" ? org.templatePriceMarketing : org.templatePriceUtility);
 }
@@ -57,6 +66,7 @@ const createSchema = z
     audienceTagId: z.string().optional(),
     audienceLabelId: z.string().optional(),
     audienceContactIds: z.array(z.string()).optional(),
+    templateParams: z.array(z.string()).default([]),
   })
   .refine((d) => d.audienceType !== "TAG" || !!d.audienceTagId, { message: "audienceTagId_required" })
   .refine((d) => d.audienceType !== "LABEL" || !!d.audienceLabelId, { message: "audienceLabelId_required" })
@@ -76,6 +86,7 @@ export async function createCampaign(req: Request, res: Response) {
   ]);
   if (!template) throw new HttpError(404, "template_not_found");
   if (template.status !== "APPROVED") throw new HttpError(400, "template_not_approved");
+  assertTemplateParams(template, input.templateParams);
   if (!session) throw new HttpError(400, "no_cloud_api_session_connected");
 
   const recipients = await resolveRecipients(
@@ -98,6 +109,7 @@ export async function createCampaign(req: Request, res: Response) {
         audienceTagId: input.audienceType === "TAG" ? input.audienceTagId : null,
         audienceLabelId: input.audienceType === "LABEL" ? input.audienceLabelId : null,
         audienceContactIds: input.audienceType === "CONTACTS" ? input.audienceContactIds! : [],
+        templateParams: input.templateParams,
       },
     });
     await tx.campaignRecipient.createMany({
@@ -127,6 +139,7 @@ export async function updateCampaign(req: Request, res: Response) {
   ]);
   if (!template) throw new HttpError(404, "template_not_found");
   if (template.status !== "APPROVED") throw new HttpError(400, "template_not_approved");
+  assertTemplateParams(template, input.templateParams);
 
   const recipients = await resolveRecipients(
     organizationId,
@@ -148,6 +161,7 @@ export async function updateCampaign(req: Request, res: Response) {
         audienceTagId: input.audienceType === "TAG" ? input.audienceTagId : null,
         audienceLabelId: input.audienceType === "LABEL" ? input.audienceLabelId : null,
         audienceContactIds: input.audienceType === "CONTACTS" ? input.audienceContactIds! : [],
+        templateParams: input.templateParams,
       },
     });
     await tx.campaignRecipient.createMany({
@@ -168,15 +182,22 @@ export async function getCampaign(req: Request, res: Response) {
   const campaign = await getOwnedCampaign(organizationId, req.params.id);
   const recipients = await prisma.campaignRecipient.findMany({
     where: { campaignId: campaign.id },
-    select: { status: true, message: { select: { status: true } } },
+    select: { status: true, error: true, message: { select: { status: true } } },
   });
 
   const recipientStatusCounts: Record<string, number> = {};
   const messageStatusCounts: Record<string, number> = {};
+  const failureCounts = new Map<string, number>();
   for (const r of recipients) {
     recipientStatusCounts[r.status] = (recipientStatusCounts[r.status] ?? 0) + 1;
     if (r.message) messageStatusCounts[r.message.status] = (messageStatusCounts[r.message.status] ?? 0) + 1;
+    if (r.status === "FAILED") failureCounts.set(r.error ?? "unknown", (failureCounts.get(r.error ?? "unknown") ?? 0) + 1);
   }
+  // Raw error strings (e.g. Meta's JSON error body) grouped so the page can show *why* sends
+  // failed — the frontend maps known Meta codes to a readable explanation.
+  const failureReasons = [...failureCounts.entries()]
+    .map(([error, count]) => ({ error, count }))
+    .sort((a, b) => b.count - a.count);
 
   // A DRAFT never got a locked-in estimatedCost (that only happens at send time) — compute a
   // live preview from the current price table so the "Enviar campanha" action on an
@@ -187,7 +208,14 @@ export async function getCampaign(req: Request, res: Response) {
     previewCost = recipients.length * priceForCategory(org, campaign.template.category);
   }
 
-  res.json({ ...campaign, recipientCount: recipients.length, recipientStatusCounts, messageStatusCounts, previewCost });
+  res.json({
+    ...campaign,
+    recipientCount: recipients.length,
+    recipientStatusCounts,
+    messageStatusCounts,
+    failureReasons,
+    previewCost,
+  });
 }
 
 const sendSchema = z.object({ scheduledFor: z.string().datetime().optional() });
@@ -203,6 +231,8 @@ export async function sendCampaign(req: Request, res: Response) {
   const campaign = await getOwnedCampaign(organizationId, req.params.id);
   if (campaign.status !== "DRAFT") throw new HttpError(400, "campaign_not_in_draft");
   if (campaign.template.status !== "APPROVED") throw new HttpError(400, "template_not_approved");
+  // A draft created before templateParams existed (or whose template changed) must be edited first.
+  assertTemplateParams(campaign.template, campaign.templateParams);
 
   const input = sendSchema.parse(req.body);
   const scheduledFor = input.scheduledFor ? new Date(input.scheduledFor) : null;
@@ -255,6 +285,13 @@ export async function deleteCampaign(req: Request, res: Response) {
   res.json({ ok: true });
 }
 
+// Spreadsheets usually hold Brazilian numbers the way people write them — DDD + number, no
+// country code (10 digits landline / 11 mobile). Without the 55, Meta rejects the recipient.
+function normalizeLeadPhone(raw: unknown): string {
+  const digits = String(raw ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  return digits.length === 10 || digits.length === 11 ? `55${digits}` : digits;
+}
+
 function normalizeHeader(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -293,7 +330,7 @@ export async function importLeadsSpreadsheet(req: Request, res: Response) {
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
     const row = sheet.getRow(rowNumber);
     const rawPhone = row.getCell(phoneCol).value;
-    const phoneNumber = String(rawPhone ?? "").replace(/\D/g, "");
+    const phoneNumber = normalizeLeadPhone(rawPhone);
     if (!phoneNumber) {
       skipped.push(rowNumber);
       continue;
