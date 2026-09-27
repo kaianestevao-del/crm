@@ -252,6 +252,31 @@ export interface CampaignDispatchJob {
   campaignId: string;
 }
 
+// Contact tags a campaign's template variable can use — a subset of the quick-reply tags
+// (see applyTags in conversations.controller.ts) that make sense for a mass send.
+export const CAMPAIGN_PARAM_TAGS = [
+  { tag: "{{nome}}", label: "Primeiro nome" },
+  { tag: "{{telefone}}", label: "Telefone" },
+] as const;
+
+// Resolves one campaign template variable for a given recipient. Meta rejects a parameter
+// containing newlines/tabs or 4+ consecutive spaces, and an empty one — so whitespace is
+// collapsed here, and an empty result is left for the caller to treat as a failure.
+export function renderCampaignParam(value: string, contact: { name: string | null; phoneNumber: string }): string {
+  const firstName = contact.name?.trim().split(/\s+/)[0] || "";
+  return value
+    .replaceAll("{{nome}}", firstName)
+    .replaceAll("{{telefone}}", contact.phoneNumber)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Fills Meta's numbered placeholders ({{1}}, {{2}}...) in a template body — used to store the
+// text the customer actually received on the Message row, instead of the raw placeholders.
+export function fillTemplateBody(bodyText: string, params: string[]): string {
+  return bodyText.replace(/\{\{(\d+)\}\}/g, (match, n) => params[Number(n) - 1] ?? match);
+}
+
 export interface JwtPayload {
   sub: string; // userId
   organizationId: string;

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
 import { api } from "../lib/api";
+import { fillTemplateBody } from "@crm/shared";
 
 type TemplateStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED";
 type TemplateCategory = "MARKETING" | "UTILITY";
@@ -67,6 +68,9 @@ function TemplateForm({
   const [error, setError] = useState<string | null>(null);
 
   const variableCount = new Set(Array.from(bodyText.matchAll(/\{\{(\d+)\}\}/g)).map((m) => m[1])).size;
+  // A contact tag like {{nome}} in an example is the most common mix-up — it's only resolved in
+  // the Campaign, and Meta's reviewer would just see the literal braces.
+  const exampleHasTag = examples.slice(0, variableCount).some((v) => /\{\{.*\}\}/.test(v));
 
   function updateExample(index: number, value: string) {
     setExamples((prev) => {
@@ -107,6 +111,28 @@ function TemplateForm({
 
   return (
     <form onSubmit={handleSubmit} className="mb-6 space-y-3 rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+        <p className="mb-1 font-semibold">Como funcionam as variáveis</p>
+        <ol className="list-decimal space-y-0.5 pl-4">
+          <li>
+            Aqui você escreve o <strong>modelo</strong> da mensagem. Onde o texto muda de um envio pro outro (nome, dia...), clique em{" "}
+            <strong>+ variável</strong> — ela vira um espaço em branco numerado: {"{{1}}"}, {"{{2}}"}...
+          </li>
+          <li>
+            Para cada espaço, dê um <strong>exemplo real</strong> (ex: Maria, segunda-feira). Ele serve só pra Meta aprovar — não é o
+            que vai ser enviado.
+          </li>
+          <li>
+            O que vai de verdade em cada espaço você escolhe depois, ao criar a <strong>Campanha</strong> — lá sim dá pra colocar o
+            nome de cada paciente automaticamente.
+          </li>
+        </ol>
+        <p className="mt-1">
+          Dica: o que é sempre igual, escreva direto no texto. Use variável só no que muda — assim o mesmo template serve pra
+          vários disparos sem nova aprovação.
+        </p>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Nome do template (minúsculas_com_underline)</label>
@@ -150,26 +176,44 @@ function TemplateForm({
           className="w-full resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
         />
         <p className="mt-1 text-xs text-gray-400">
-          Use {"{{1}}"}, {"{{2}}"}... para os campos que a Meta vai exigir preencher ao disparar (formato dela, diferente das
-          tags {"{{nome}}"} das Respostas Rápidas).
+          Ex: Oi {"{{1}}"}, sua consulta está confirmada para {"{{2}}"}. — o {"{{1}}"} e o {"{{2}}"} são só a ordem dos espaços,
+          não o conteúdo.
         </p>
       </div>
 
       {variableCount > 0 && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-500">
-            Valores de exemplo (a Meta exige um exemplo real por variável para aprovar)
-          </label>
+          <label className="mb-1 block text-xs font-medium text-gray-500">Exemplos para a Meta aprovar</label>
+          <p className="mb-2 text-xs text-gray-400">
+            Escreva um valor real de amostra (ex: Maria). <strong>Não</strong> use {"{{nome}}"} aqui — o nome de cada paciente é
+            escolhido na Campanha.
+          </p>
           <div className="grid gap-2 sm:grid-cols-2">
             {Array.from({ length: variableCount }).map((_, i) => (
-              <input
-                key={i}
-                value={examples[i] ?? ""}
-                onChange={(e) => updateExample(i, e.target.value)}
-                placeholder={`Exemplo para {{${i + 1}}}`}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              />
+              <div key={i} className="flex items-center gap-2">
+                <span className="w-10 shrink-0 font-mono text-xs text-gray-500">{`{{${i + 1}}}`}</span>
+                <input
+                  value={examples[i] ?? ""}
+                  onChange={(e) => updateExample(i, e.target.value)}
+                  placeholder={i === 0 ? "ex: Maria" : "ex: segunda-feira"}
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                />
+              </div>
             ))}
+          </div>
+          {exampleHasTag && (
+            <p className="mt-2 text-xs text-amber-600">
+              Coloque um exemplo real no lugar de {"{{...}}"} — a Meta pode recusar o template.
+            </p>
+          )}
+          <div className="mt-3 rounded-xl bg-gray-50 p-3">
+            <p className="mb-1 text-xs font-medium text-gray-500">Como a Meta vai ver o exemplo</p>
+            <p className="whitespace-pre-wrap text-sm text-gray-700">
+              {fillTemplateBody(
+                bodyText,
+                Array.from({ length: variableCount }, (_, i) => examples[i]?.trim() || `{{${i + 1}}}`),
+              )}
+            </p>
           </div>
         </div>
       )}
@@ -263,7 +307,10 @@ export function TemplatesPage() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Templates</h1>
-          <p className="text-sm text-gray-500">Modelos de mensagem aprovados pela Meta, usados nas Campanhas.</p>
+          <p className="text-sm text-gray-500">
+            Modelos de mensagem aprovados pela Meta. O conteúdo de cada variável ({"{{1}}"}, {"{{2}}"}...) é escolhido na hora de
+            criar a Campanha.
+          </p>
         </div>
         {!formMode && (
           <button
