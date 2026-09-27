@@ -191,7 +191,12 @@ export async function getCampaign(req: Request, res: Response) {
   for (const r of recipients) {
     recipientStatusCounts[r.status] = (recipientStatusCounts[r.status] ?? 0) + 1;
     if (r.message) messageStatusCounts[r.message.status] = (messageStatusCounts[r.message.status] ?? 0) + 1;
-    if (r.status === "FAILED") failureCounts.set(r.error ?? "unknown", (failureCounts.get(r.error ?? "unknown") ?? 0) + 1);
+    if (r.status === "FAILED") {
+      // Meta stamps every error body with a unique fbtrace_id — dropped so identical failures
+      // group into one line instead of one per recipient.
+      const key = (r.error ?? "unknown").replace(/,?"fbtrace_id":"[^"]*"/, "");
+      failureCounts.set(key, (failureCounts.get(key) ?? 0) + 1);
+    }
   }
   // Raw error strings (e.g. Meta's JSON error body) grouped so the page can show *why* sends
   // failed — the frontend maps known Meta codes to a readable explanation.
