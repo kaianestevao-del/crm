@@ -112,6 +112,22 @@ function describeFailure(raw: string): string {
   return metaMessage ?? raw;
 }
 
+// Billing category badge — the template's category as Meta has it (synced on page open, see
+// POST /templates/sync-all), which is what Meta charges the campaign's messages at.
+function CategoryBadge({ category, sent }: { category: string; sent: boolean }) {
+  const marketing = category === "MARKETING";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+        marketing ? "bg-amber-100 text-amber-800" : "bg-sky-100 text-sky-800"
+      }`}
+    >
+      {sent ? "Cobrada como " : ""}
+      {marketing ? "Marketing" : "Utility"}
+    </span>
+  );
+}
+
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
@@ -703,6 +719,12 @@ function CampaignDetails({ id, onChanged }: { id: string; onChanged: () => void 
         </div>
       )}
       <div>
+        <p className="text-xs text-gray-400">Cobrança da Meta</p>
+        <p className="mt-0.5">
+          <CategoryBadge category={detail.template.category} sent />
+        </p>
+      </div>
+      <div>
         <p className="text-xs text-gray-400">Estimativa no envio</p>
         <p className="font-semibold">{money(detail.estimatedCost)}</p>
       </div>
@@ -833,6 +855,7 @@ export function CampaignsPage() {
                   <span className="text-sm font-medium text-gray-900">{c.name}</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{c.template.name}</span>
+                  <CategoryBadge category={c.template.category} sent={c.status === "SENDING" || c.status === "DONE"} />
                   {c.status === "SCHEDULED" && c.scheduledFor && (
                     <span className="text-xs text-blue-600">{formatDateTime(c.scheduledFor)}</span>
                   )}
