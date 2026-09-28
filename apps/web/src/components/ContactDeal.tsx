@@ -34,6 +34,9 @@ interface Deal {
   followUp: FollowUp | null;
 }
 
+// Sentinel <option> value in the stage picker — picking it asks to take the contact out of the funnel.
+const REMOVE_FROM_PIPELINE = "__remove__";
+
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 
@@ -48,6 +51,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   const [saving, setSaving] = useState(false);
   const [showFollowUpPanel, setShowFollowUpPanel] = useState(false);
   const [togglingIndex, setTogglingIndex] = useState<number | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   async function refresh() {
     const [pipelinesRes, dealRes] = await Promise.all([api.get("/pipelines"), api.get(`/pipelines/contacts/${contactId}/deal`)]);
@@ -62,6 +66,7 @@ export function ContactDeal({ contactId }: { contactId: string }) {
     setLoaded(false);
     setShowPanel(false);
     setShowFollowUpPanel(false);
+    setConfirmRemove(false);
     refresh()
       .catch(() => {})
       .finally(() => !cancelled && setLoaded(true));
@@ -72,8 +77,21 @@ export function ContactDeal({ contactId }: { contactId: string }) {
   }, [contactId]);
 
   async function handleStageChange(stageId: string) {
+    if (stageId === REMOVE_FROM_PIPELINE) {
+      setShowPanel(false);
+      setShowFollowUpPanel(false);
+      setConfirmRemove(true);
+      return;
+    }
     setDeal((prev) => (prev ? { ...prev, stageId } : prev));
     await api.put(`/pipelines/contacts/${contactId}/deal-stage`, { stageId });
+    await refresh();
+  }
+
+  async function handleRemoveFromPipeline() {
+    if (!deal) return;
+    setConfirmRemove(false);
+    await api.delete(`/pipelines/deals/${deal.id}`);
     await refresh();
   }
 
@@ -144,7 +162,20 @@ export function ContactDeal({ contactId }: { contactId: string }) {
             📊 {stage.name}
           </option>
         ))}
+        {deal && <option value={REMOVE_FROM_PIPELINE}>✕ Remover do funil</option>}
       </select>
+
+      {confirmRemove && deal && (
+        <span className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700">
+          {deal.payments.length > 0 ? "Remover do funil (apaga os lançamentos)?" : "Remover do funil?"}
+          <button type="button" onClick={handleRemoveFromPipeline} className="font-medium hover:underline">
+            Confirmar
+          </button>
+          <button type="button" onClick={() => setConfirmRemove(false)} className="text-gray-500 hover:underline">
+            Cancelar
+          </button>
+        </span>
+      )}
 
       {deal?.followUp && (
         <div className="relative">

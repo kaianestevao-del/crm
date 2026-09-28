@@ -59,9 +59,11 @@ export function KanbanPage() {
   const [showStageForm, setShowStageForm] = useState(false);
   const [newStageName, setNewStageName] = useState("");
   const [savingStage, setSavingStage] = useState(false);
-  const [stageError, setStageError] = useState<string | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
   const [confirmDeleteStageId, setConfirmDeleteStageId] = useState<string | null>(null);
   const [confirmDeleteDealId, setConfirmDeleteDealId] = useState<string | null>(null);
+  // Per-column lead search: a stage id is present once its 🔍 was opened, mapped to the typed text.
+  const [stageSearch, setStageSearch] = useState<Record<string, string>>({});
 
   async function refresh() {
     const [pipelinesRes, contactsRes] = await Promise.all([api.get("/pipelines"), api.get("/contacts")]);
@@ -89,31 +91,47 @@ export function KanbanPage() {
     await refresh();
   }
 
-  async function handleDragEnd(result: DropResult) {
-    if (!result.destination || !pipeline) return;
-    const { draggableId, destination } = result;
-
+  // Optimistically places the deal at `index` of `stageId` (clamped to the column's end), then
+  // persists it. On failure the board is reloaded from the server so it never shows a position
+  // that wasn't saved.
+  async function moveDeal(dealId: string, stageId: string, index: number) {
+    setBoardError(null);
     setPipeline((prev) => {
       if (!prev) return prev;
       const stages = prev.stages.map((s) => ({ ...s, deals: [...s.deals] }));
       let moved: Deal | undefined;
       for (const stage of stages) {
-        const idx = stage.deals.findIndex((d) => d.id === draggableId);
+        const idx = stage.deals.findIndex((d) => d.id === dealId);
         if (idx >= 0) {
           [moved] = stage.deals.splice(idx, 1);
           break;
         }
       }
       if (!moved) return prev;
-      const destStage = stages.find((s) => s.id === destination.droppableId);
-      destStage?.deals.splice(destination.index, 0, { ...moved, stageId: destination.droppableId });
+      const destStage = stages.find((s) => s.id === stageId);
+      destStage?.deals.splice(index, 0, { ...moved, stageId });
       return { ...prev, stages };
     });
 
-    await api.patch(`/pipelines/deals/${draggableId}/move`, {
-      stageId: destination.droppableId,
-      order: destination.index,
-    });
+    try {
+      await api.patch(`/pipelines/deals/${dealId}/move`, { stageId, order: index });
+    } catch {
+      setBoardError("Não foi possível mover o lead. O funil foi recarregado — tente de novo.");
+      await refresh();
+    }
+  }
+
+  async function handleDragEnd(result: DropResult) {
+    const { draggableId, source, destination } = result;
+    if (!destination || !pipeline) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    await moveDeal(draggableId, destination.droppableId, destination.index);
+  }
+
+  async function handleChangeDealStage(deal: Deal, stageId: string) {
+    if (!pipeline || stageId === deal.stageId) return;
+    const destStage = pipeline.stages.find((s) => s.id === stageId);
+    await moveDeal(deal.id, stageId, destStage?.deals.length ?? 0);
   }
 
   async function handleCreateStage(e: FormEvent) {
@@ -131,7 +149,7 @@ export function KanbanPage() {
   }
 
   async function handleDeleteStage(stageId: string) {
-    setStageError(null);
+    setBoardError(null);
     setConfirmDeleteStageId(null);
     try {
       await api.delete(`/pipelines/stages/${stageId}`);
@@ -141,7 +159,7 @@ export function KanbanPage() {
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error === "stage_has_deals"
           ? "Mova ou apague os negócios desta etapa antes de removê-la."
           : "Não foi possível apagar esta etapa.";
-      setStageError(message);
+      setBoardError(message);
     }
   }
 
@@ -149,6 +167,26 @@ export function KanbanPage() {
     setConfirmDeleteDealId(null);
     await api.delete(`/pipelines/deals/${dealId}`);
     await refresh();
+  }
+
+  function toggleStageSearch(stageId: string) {
+    setStageSearch((prev) => {
+      const next = { ...prev };
+      if (stageId in next) delete next[stageId];
+      else next[stageId] = "";
+      return next;
+    });
+  }
+
+  function matchesSearch(deal: Deal, query: string) {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const digits = q.replace(/\D/g, "");
+    return (
+      (deal.contact.name ?? "").toLowerCase().includes(q) ||
+      deal.title.toLowerCase().includes(q) ||
+      (digits.length > 0 && deal.contact.phoneNumber.includes(digits))
+    );
   }
 
   if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando funil...</div>;
@@ -204,10 +242,10 @@ export function KanbanPage() {
         </form>
       )}
 
-      {stageError && (
+      {boardError && (
         <div className="mb-4 flex items-center justify-between rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {stageError}
-          <button onClick={() => setStageError(null)} className="text-red-400 hover:underline">
+          {boardError}
+          <button onClick={() => setBoardError(null)} className="text-red-400 hover:underline">
             ✕
           </button>
         </div>
@@ -242,19 +280,28 @@ export function KanbanPage() {
       )}
 
       <DragDropContext onDragEnd={handleDragEnd}>
-        <div className="flex flex-1 gap-4 overflow-x-auto">
+        {/* `items-start` + `min-h-full`: without it every column is capped at the board's
+            height and long columns spill their cards below the column's own box — drops
+            onto those spilled cards land outside the Droppable and snap back. */}
+        <div className="flex min-h-0 flex-1 items-start gap-4 overflow-auto">
           {pipeline.stages.map((stage) => {
             const stageTotal = stage.deals.reduce(
               (sum, d) => sum + d.payments.reduce((s, p) => s + p.value, 0),
               0,
             );
+            const searchOpen = stage.id in stageSearch;
+            const searchQuery = stageSearch[stage.id] ?? "";
+            const isFiltering = searchQuery.trim().length > 0;
+            const visibleDeals = isFiltering ? stage.deals.filter((d) => matchesSearch(d, searchQuery)) : stage.deals;
             return (
-            <Droppable droppableId={stage.id} key={stage.id}>
+            // While filtered, drop positions would be relative to the filtered list, not the
+            // real column — so the column stops accepting drops until the search is cleared.
+            <Droppable droppableId={stage.id} key={stage.id} isDropDisabled={isFiltering}>
               {(provided) => (
                 <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
-                  className="flex w-72 flex-shrink-0 flex-col rounded-2xl border border-gray-200 bg-white/60 p-3 shadow-sm"
+                  className="flex min-h-full w-72 flex-shrink-0 flex-col rounded-2xl border border-gray-200 bg-white/60 p-3 shadow-sm"
                 >
                   <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-2">
                     <div>
@@ -268,6 +315,14 @@ export function KanbanPage() {
                         <p className="text-xs text-gray-400">{currencyFormatter.format(stageTotal)}</p>
                       )}
                     </div>
+                    <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => toggleStageSearch(stage.id)}
+                      title="Procurar lead nesta etapa"
+                      className={`rounded-lg p-1 hover:bg-gray-100 ${searchOpen ? "text-brand-dark" : "text-gray-400"}`}
+                    >
+                      <Icon name="search" className="h-4 w-4" />
+                    </button>
                     {confirmDeleteStageId === stage.id ? (
                       <span className="flex items-center gap-1 text-xs">
                         <button onClick={() => handleDeleteStage(stage.id)} className="font-medium text-red-600 hover:underline">
@@ -286,9 +341,27 @@ export function KanbanPage() {
                         −
                       </button>
                     )}
+                    </div>
                   </div>
+                  {searchOpen && (
+                    <div className="mb-2">
+                      <input
+                        autoFocus
+                        value={searchQuery}
+                        onChange={(e) => setStageSearch((prev) => ({ ...prev, [stage.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Escape" && toggleStageSearch(stage.id)}
+                        placeholder="Nome ou telefone..."
+                        className="w-full rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-brand focus:outline-none"
+                      />
+                      {isFiltering && (
+                        <p className="mt-1 text-xs text-gray-400">
+                          {visibleDeals.length} de {stage.deals.length} · limpe a busca para soltar leads aqui
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="flex-1 space-y-2">
-                    {stage.deals.map((deal, index) => {
+                    {visibleDeals.map((deal, index) => {
                       const totalValue = deal.payments.reduce((sum, p) => sum + p.value, 0);
                       const planTypes = Array.from(new Set(deal.payments.map((p) => p.planType).filter(Boolean))) as PlanType[];
                       return (
@@ -329,6 +402,19 @@ export function KanbanPage() {
                                 {deal.followUp.contacts.length} de {deal.followUp.target} follow-ups
                               </p>
                             )}
+                            <select
+                              value={deal.stageId}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onChange={(e) => handleChangeDealStage(deal, e.target.value)}
+                              title="Mudar etapa do funil"
+                              className="mt-2 w-full rounded-full border border-brand bg-brand/10 px-2 py-0.5 text-xs text-brand-dark focus:outline-none"
+                            >
+                              {pipeline.stages.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  📊 {s.name}
+                                </option>
+                              ))}
+                            </select>
                             <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2">
                               <button
                                 onMouseDown={(e) => e.stopPropagation()}

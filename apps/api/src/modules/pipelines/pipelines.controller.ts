@@ -152,15 +152,23 @@ export async function moveDeal(req: Request, res: Response) {
   if (!stage) throw new HttpError(404, "stage_not_found");
 
   await prisma.$transaction(async (tx) => {
-    // Shift existing deals in the destination stage to make room, then place this one at `order`.
-    await tx.deal.updateMany({
-      where: { stageId: input.stageId, order: { gte: input.order } },
-      data: { order: { increment: 1 } },
+    // `order` is the card's position in the column as the board shows it, not a raw `order`
+    // value — stored orders have gaps (deletions, deals appended from the inbox), so we
+    // re-number the whole destination column around the moved deal instead of shifting.
+    const siblings = await tx.deal.findMany({
+      where: { stageId: input.stageId, id: { not: deal.id } },
+      orderBy: { order: "asc" },
+      select: { id: true, order: true },
     });
-    await tx.deal.update({
-      where: { id: deal.id },
-      data: { stageId: input.stageId, order: input.order },
-    });
+    const column = [...siblings];
+    column.splice(Math.min(input.order, column.length), 0, { id: deal.id, order: -1 });
+    for (const [index, d] of column.entries()) {
+      if (d.id === deal.id) {
+        await tx.deal.update({ where: { id: d.id }, data: { stageId: input.stageId, order: index } });
+      } else if (d.order !== index) {
+        await tx.deal.update({ where: { id: d.id }, data: { order: index } });
+      }
+    }
     await transitionDealStage(tx, deal.id, deal.stageId, input.stageId);
   });
 
