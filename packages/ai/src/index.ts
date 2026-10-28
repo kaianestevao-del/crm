@@ -135,7 +135,7 @@ Ao transferir, marque handoff como true, explique o motivo em handoff_reason (um
 
 Em todas as respostas, informe também:
 - stage: em que etapa a conversa está depois da sua resposta. "inicio" enquanto você se apresenta e descobre o nome e o objetivo; "qualificando" a partir das perguntas sobre rotina, histórico e dificuldades e enquanto explica os formatos; "negociacao" quando ela aceitou a pré-consulta (questionário ou agendamento) ou escolheu um plano para fechar.
-- objective: o objetivo da pessoa em poucas palavras, do jeito que ela contou (ex.: "emagrecer 10 kg", "ganhar massa muscular"). Vazio enquanto ela não disse.
+- objective: o objetivo de corpo ou saúde da pessoa em poucas palavras, do jeito que ela contou (ex.: "emagrecer 10 kg", "ganhar massa muscular"). Nunca o nome de um plano ou serviço ("plano premium", "consultoria on-line" não são objetivos). Vazio enquanto ela não disse.
 
 ## Instruções do negócio
 ${aiPrompt.trim() || "(sem instruções adicionais)"}
@@ -168,7 +168,7 @@ const REPLY_SCHEMA = {
     handoff: { type: "boolean", description: "true quando um humano precisa assumir a conversa." },
     handoff_reason: { type: "string", description: "Motivo da transferência, para a equipe. Vazio se handoff for false." },
     stage: { type: "string", enum: [...AI_STAGES], description: "Etapa da conversa depois desta resposta." },
-    objective: { type: "string", description: "Objetivo da pessoa em poucas palavras. Vazio se ainda não disse." },
+    objective: { type: "string", description: "Objetivo de corpo ou saúde da pessoa em poucas palavras (nunca um plano). Vazio se ainda não disse." },
   },
   required: ["reply", "handoff", "handoff_reason", "stage", "objective"],
   additionalProperties: false,
