@@ -281,6 +281,11 @@ export function fillTemplateBody(bodyText: string, params: string[]): string {
   return bodyText.replace(/\{\{(\d+)\}\}/g, (match, n) => params[Number(n) - 1] ?? match);
 }
 
+// Every Meta Graph API call (Cloud API sends, templates, media, Marketing Messages API) goes
+// through this one base URL, so moving to a new version is a single edit here. Each version is
+// shut off ~2 years after release — see developers.facebook.com/docs/graph-api/changelog.
+export const META_GRAPH_API_BASE = "https://graph.facebook.com/v26.0";
+
 export interface JwtPayload {
   sub: string; // userId
   organizationId: string;

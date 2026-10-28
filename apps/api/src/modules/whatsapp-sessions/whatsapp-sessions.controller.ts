@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Request, Response } from "express";
 import { z } from "zod";
-import { WHATSAPP_PROVIDERS } from "@crm/shared";
+import { META_GRAPH_API_BASE, WHATSAPP_PROVIDERS } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { env } from "../../env";
 import { HttpError } from "../../utils/httpError";
@@ -24,7 +24,7 @@ const createSchema = z.object({
 // actual WhatsApp number. Fetching it from the Graph API is what lets us build wa.me links.
 async function fetchCloudApiPhoneNumber(phoneNumberId: string, accessToken: string): Promise<string | null> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${phoneNumberId}?fields=display_phone_number`,
+    `${META_GRAPH_API_BASE}/${phoneNumberId}?fields=display_phone_number`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
   if (!res.ok) return null;

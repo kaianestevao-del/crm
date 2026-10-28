@@ -15,7 +15,7 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode";
 import pino from "pino";
 import { getPrismaClient, MessageDirection, MessageStatus, MessageType, SessionStatus } from "@crm/db";
-import { MONTH_NAMES_PT, type OutboundMessageJob, type InboundCloudMessageJob } from "@crm/shared";
+import { META_GRAPH_API_BASE, MONTH_NAMES_PT, type OutboundMessageJob, type InboundCloudMessageJob } from "@crm/shared";
 import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
@@ -703,7 +703,7 @@ async function applyMessageStatusUpdate(organizationId: string, waMessageId: str
   });
 }
 
-const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
+const CLOUD_API_BASE = META_GRAPH_API_BASE;
 
 async function sendCloudApiMessage(
   job: OutboundMessageJob,

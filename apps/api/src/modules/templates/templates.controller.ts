@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { TemplateCategory } from "@crm/db";
+import { META_GRAPH_API_BASE } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
-const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
+const CLOUD_API_BASE = META_GRAPH_API_BASE;
 
 // Every org here is single-tenant in practice (one clinic per deployment, same assumption the
 // daily backup worker already makes) — Templates/Campaigns act on whichever Cloud API session

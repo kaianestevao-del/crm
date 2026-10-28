@@ -5,6 +5,7 @@ import {
   QUEUE_OUTBOUND_MESSAGES,
   CampaignDispatchJob,
   OutboundMessageJob,
+  META_GRAPH_API_BASE,
   fillTemplateBody,
   renderCampaignParam,
 } from "@crm/shared";
@@ -19,7 +20,7 @@ const outboundMessagesQueue = new Queue<OutboundMessageJob>(QUEUE_OUTBOUND_MESSA
   connection: createRedisClient(),
 });
 
-const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
+const CLOUD_API_BASE = META_GRAPH_API_BASE;
 
 // Meta re-classifies UTILITY templates as MARKETING after approval when the copy reads as
 // promotional, and the category decides which endpoint each send goes through (see

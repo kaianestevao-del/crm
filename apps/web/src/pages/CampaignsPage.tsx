@@ -93,6 +93,7 @@ function describeFailure(raw: string): string {
   switch (code) {
     case "132000":
     case "132012":
+    case "132018":
       return "Variáveis do template não batem com o que a Meta espera.";
     case "132001":
       return "Template não existe na Meta com esse nome/idioma.";
