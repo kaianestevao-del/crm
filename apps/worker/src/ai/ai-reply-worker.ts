@@ -22,6 +22,7 @@ import {
 } from "@crm/ai";
 import { createRedisClient } from "../redis";
 import { publishRealtimeEvent } from "../pubsub";
+import { isContactTyping } from "./typing";
 
 const prisma = getPrismaClient();
 
@@ -29,8 +30,13 @@ const aiRepliesQueue = new Queue<AiReplyJob>(QUEUE_AI_REPLIES, { connection: cre
 const outboundMessagesQueue = new Queue<OutboundMessageJob>(QUEUE_OUTBOUND_MESSAGES, { connection: createRedisClient() });
 
 // Guard rails — the assistant must never run away with a conversation:
-// - it waits a minute after the last inbound message, so several short messages get one reply;
-const DEBOUNCE_MS = 60_000;
+// - it waits 30s to 1min (random, so it doesn't feel like a bot) after the last inbound message,
+//   so several short messages get one reply...
+const DEBOUNCE_MIN_MS = 30_000;
+const DEBOUNCE_MAX_MS = 60_000;
+// - ...and while the customer is typing it keeps pushing the reply back, up to a limit;
+const TYPING_RECHECK_MS = 10_000;
+const MAX_TYPING_WAITS = 12;
 // - at most this many replies per conversation in 24h, then it hands off to the team;
 const MAX_REPLIES_PER_DAY = 25;
 // - a reply longer than this is not sent (hand off instead) — real replies are a few lines;
@@ -40,20 +46,26 @@ const ATTENDANT_QUIET_MS = 12 * 60 * 60 * 1000;
 // How much of the conversation the assistant reads.
 const HISTORY_LIMIT = 40;
 
+// How long "digitando…" shows before a reply goes out — roughly typing speed, within bounds.
+function typingDuration(text: string) {
+  return Math.min(8_000, Math.max(2_000, text.length * 30));
+}
+
 // Called for every live inbound message, right after it's recorded. Applies the keyword's origin
 // tag, switches the assistant on for the conversation when the message matches an activation
-// phrase, and schedules the (debounced) reply. Never sends anything itself.
+// phrase, and schedules the (debounced) reply. Never sends anything itself. Returns whether a
+// reply was scheduled.
 export async function onInboundMessageForAi(organizationId: string, conversationId: string, contactId: string, message: Message) {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
     select: { aiEnabled: true, anthropicApiKey: true, aiKeywords: true },
   });
-  if (!org) return;
+  if (!org) return false;
 
   const keyword = message.content ? findActivationKeyword(message.content, org.aiKeywords) : null;
   if (keyword?.origin) await tagContact(organizationId, contactId, keyword.origin);
 
-  if (!org.aiEnabled || !org.anthropicApiKey) return;
+  if (!org.aiEnabled || !org.anthropicApiKey) return false;
 
   if (keyword) {
     // Only an automatic (null) conversation is switched on by a keyword — one an attendant or the
@@ -62,11 +74,26 @@ export async function onInboundMessageForAi(organizationId: string, conversation
     if (switched.count) publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId });
   }
 
+  const delay = DEBOUNCE_MIN_MS + Math.floor(Math.random() * (DEBOUNCE_MAX_MS - DEBOUNCE_MIN_MS));
   await aiRepliesQueue.add(
     "reply",
     { organizationId, conversationId, messageId: message.id },
-    { delay: DEBOUNCE_MS, jobId: `ai-${message.id}`, removeOnComplete: true, removeOnFail: 200 },
+    { delay, jobId: `ai-${message.id}`, removeOnComplete: true, removeOnFail: 200 },
   );
+  return true;
+}
+
+// Pushes the reply back a few seconds because the customer is still typing. False once it already
+// waited long enough — then it answers anyway (a stuck "composing" must not silence it forever).
+async function waitForTyping(job: AiReplyJob, sessionId: string, waJid: string) {
+  const waits = job.typingWaits ?? 0;
+  if (waits >= MAX_TYPING_WAITS || !isContactTyping(sessionId, waJid)) return false;
+  await aiRepliesQueue.add(
+    "reply",
+    { ...job, typingWaits: waits + 1 },
+    { delay: TYPING_RECHECK_MS, jobId: `ai-${job.messageId}-t${waits + 1}`, removeOnComplete: true, removeOnFail: 200 },
+  );
+  return true;
 }
 
 async function tagContact(organizationId: string, contactId: string, tagName: string) {
@@ -114,6 +141,8 @@ async function processAiReply(job: AiReplyJob) {
   // messages from the customer, or an attendant's reply), this job steps aside.
   const latest = await prisma.message.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
   if (latest?.id !== messageId) return;
+
+  if (await waitForTyping(job, conversation.whatsappSessionId, conversation.contact.waJid)) return;
 
   const org = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
   if (!org.aiEnabled || !org.anthropicApiKey) return;
@@ -201,6 +230,9 @@ async function processAiReply(job: AiReplyJob) {
     prisma.conversation.findUnique({ where: { id: conversationId }, select: { aiEnabled: true } }),
   ]);
   if (stillLatest?.id !== messageId || fresh?.aiEnabled === false) return;
+  // She started typing while the reply was being written — ask again once she's done, with
+  // whatever she adds.
+  if (await waitForTyping(job, conversation.whatsappSessionId, conversation.contact.waJid)) return;
 
   if (reply.reply) await sendAiMessage(organizationId, conversation, reply.reply);
 
@@ -242,6 +274,7 @@ async function sendAiMessage(
     messageId: message.id,
     waJid: conversation.contact.waJid,
     text,
+    typingMs: typingDuration(text),
   });
 }
 

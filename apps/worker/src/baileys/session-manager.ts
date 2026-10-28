@@ -20,6 +20,7 @@ import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
 import { onInboundMessageForAi } from "../ai/ai-reply-worker";
+import { setContactPresence } from "../ai/typing";
 
 const prisma = getPrismaClient();
 const logger = pino({ level: "warn" });
@@ -175,6 +176,14 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
     }
   });
 
+  // Typing indicators of contacts we subscribed to (see watchContactTyping) — the AI assistant
+  // holds its reply while the customer is still writing.
+  sock.ev.on("presence.update", ({ id, presences }) => {
+    for (const [participant, presence] of Object.entries(presences)) {
+      setContactPresence(sessionId, id.endsWith("@g.us") ? participant : id, presence.lastKnownPresence);
+    }
+  });
+
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
@@ -278,6 +287,12 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
       console.error("sync_label_association_error", err);
     }
   });
+}
+
+// WhatsApp only sends a contact's typing indicator to whoever subscribed to their presence.
+// Best-effort and a no-op for Cloud API sessions (no socket, no presence).
+function watchContactTyping(sessionId: string, jid: string) {
+  activeSockets.get(sessionId)?.presenceSubscribe(jid).catch(() => {});
 }
 
 export async function addWhatsappLabelToChat(sessionId: string, waJid: string, waLabelId: string) {
@@ -510,9 +525,11 @@ async function upsertContactAndRecordMessage(
   // triggers it (it would otherwise re-tag every contact off their oldest messages).
   if (!opts.isHistorical && !fromMe) {
     await maybeAutoTag(organizationId, contact.id, text).catch((err) => console.error("auto_tag_error", err));
-    await onInboundMessageForAi(organizationId, conversation.id, contact.id, message).catch((err) =>
-      console.error("ai_inbound_error", err),
-    );
+    const aiScheduled = await onInboundMessageForAi(organizationId, conversation.id, contact.id, message).catch((err) => {
+      console.error("ai_inbound_error", err);
+      return false;
+    });
+    if (aiScheduled) watchContactTyping(sessionId, jid);
   }
 
   // Someone answered from the phone itself (Baileys only — Cloud API never echoes our sends): same
@@ -832,6 +849,12 @@ export async function sendOutboundMessage(job: OutboundMessageJob) {
         content = { document: { url: job.mediaUrl }, mimetype, fileName: job.mediaName ?? "arquivo", caption: job.text };
       } else {
         content = { text: job.text ?? "" };
+      }
+
+      if (job.typingMs) {
+        await sock.sendPresenceUpdate("composing", job.waJid).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, job.typingMs));
+        await sock.sendPresenceUpdate("paused", job.waJid).catch(() => {});
       }
 
       const result = await sock.sendMessage(job.waJid, content);

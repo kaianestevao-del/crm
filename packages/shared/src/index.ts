@@ -160,6 +160,8 @@ export interface AiReplyJob {
   organizationId: string;
   conversationId: string;
   messageId: string;
+  // How many times this reply was already pushed back because the customer was typing.
+  typingWaits?: number;
 }
 
 export interface TranscribeAudioJob {
@@ -193,6 +195,9 @@ export interface OutboundMessageJob {
   // Present only for campaign sends — the worker updates this CampaignRecipient's status
   // (SENT/FAILED) after attempting the send, alongside the regular Message it always creates.
   campaignRecipientId?: string;
+  // Show "digitando…" to the contact for this long before sending (Baileys only; the AI
+  // assistant sets it so its replies don't land out of nowhere).
+  typingMs?: number;
 }
 
 // A multi-step quick reply (e.g. text, then a document, then a follow-up text) is sent as
