@@ -8,6 +8,8 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { InboxPage } from "./pages/InboxPage";
 import { ContactsPage } from "./pages/ContactsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { FlowsPage } from "./pages/FlowsPage";
+import { FlowEditorPage } from "./pages/FlowEditorPage";
 import { KanbanPage } from "./pages/KanbanPage";
 import { ConnectWhatsappPage } from "./pages/ConnectWhatsappPage";
 import { AutoRepliesPage } from "./pages/AutoRepliesPage";
@@ -48,6 +50,8 @@ export function App() {
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/campanhas" element={<CampaignsPage />} />
               <Route path="/ia" element={<AiAssistantPage />} />
+              <Route path="/funil" element={<FlowsPage />} />
+              <Route path="/funil/:id" element={<FlowEditorPage />} />
             </Route>
             <Route path="/links" element={<LinksPage />} />
           </Route>

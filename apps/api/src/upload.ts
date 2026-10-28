@@ -28,6 +28,11 @@ export const uploadQuickReplyMedia = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
+export const uploadFlowMedia = multer({
+  storage: diskStorage("flows"),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
 // Parsed once for its rows and discarded — nothing to serve later, so no disk storage needed.
 export const uploadSpreadsheet = multer({
   storage: multer.memoryStorage(),

@@ -10,6 +10,14 @@ import { outboundMessagesQueue } from "../../queues";
 import { publishRealtimeEvent } from "../../pubsub";
 import { transcodeToOpusOgg } from "../../media/transcodeAudio";
 
+// Same as the worker's flows/flow-inbound.ts stopFlowRuns — kept here so the API doesn't depend on the worker.
+async function stopFlowRuns(conversationId: string) {
+  await prisma.flowRun.updateMany({
+    where: { conversationId, status: { in: ["RUNNING", "WAITING"] } },
+    data: { status: "STOPPED", token: null, finishedAt: new Date() },
+  });
+}
+
 export async function listConversations(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const conversations = await prisma.conversation.findMany({
@@ -262,8 +270,10 @@ export async function sendMessage(req: Request, res: Response) {
   );
 
   // An attendant stepped in — the AI assistant stops answering this conversation until someone
-  // switches it back on from the Inbox toggle, so the two never talk over each other.
+  // switches it back on from the Inbox toggle, and a Funil flow running in it stops, so nothing
+  // automated talks over the attendant.
   await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date(), aiEnabled: false } });
+  await stopFlowRuns(conversation.id);
   if (conversation.aiEnabled !== false) {
     publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
   }
@@ -355,8 +365,10 @@ export async function sendAttachment(req: Request, res: Response) {
   });
 
   // An attendant stepped in — the AI assistant stops answering this conversation until someone
-  // switches it back on from the Inbox toggle, so the two never talk over each other.
+  // switches it back on from the Inbox toggle, and a Funil flow running in it stops, so nothing
+  // automated talks over the attendant.
   await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date(), aiEnabled: false } });
+  await stopFlowRuns(conversation.id);
   if (conversation.aiEnabled !== false) {
     publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
   }

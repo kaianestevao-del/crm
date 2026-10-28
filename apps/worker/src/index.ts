@@ -16,6 +16,7 @@ import { createScheduledMessagesWorker } from "./queues/scheduled-messages-worke
 import { createInboundCloudMessagesWorker } from "./queues/inbound-cloud-messages-worker";
 import { createCampaignDispatchWorker } from "./queues/campaign-dispatch-worker";
 import { createAiReplyWorker } from "./ai/ai-reply-worker";
+import { createFlowStepsWorker } from "./flows/flow-runner";
 import { createDailyBackupWorker, scheduleDailyBackup } from "./backup/daily-backup-worker";
 
 async function main() {
@@ -27,6 +28,7 @@ async function main() {
   createInboundCloudMessagesWorker();
   createCampaignDispatchWorker();
   createAiReplyWorker();
+  createFlowStepsWorker();
   createDailyBackupWorker();
   await scheduleDailyBackup();
 

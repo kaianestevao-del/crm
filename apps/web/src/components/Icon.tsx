@@ -21,7 +21,8 @@ export type IconName =
   | "plus"
   | "link"
   | "megaphone"
-  | "sparkles";
+  | "sparkles"
+  | "flow";
 
 const paths: Record<IconName, JSX.Element> = {
   grid: (
@@ -166,6 +167,13 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" />
       <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" />
+    </>
+  ),
+  flow: (
+    <>
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="15" width="6" height="6" rx="1" />
+      <path d="M9 6h4a2 2 0 0 1 2 2v7" />
     </>
   ),
 };

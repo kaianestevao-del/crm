@@ -14,7 +14,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   inbox: "Caixa de Entrada",
   contacts: "Contatos",
   dashboard: "Dashboard",
-  kanban: "Funil",
+  kanban: "Kanban",
   autoatendimento: "Autoatendimento",
 };
 
@@ -164,6 +164,73 @@ export interface AiReplyJob {
   typingWaits?: number;
 }
 
+// Funil (automação de fluxo): one job per step that has to happen later — a "wait" item, or the
+// "no reply in X" timer of a block waiting for an answer. `token` must still match the run's,
+// see FlowRun in the Prisma schema; see apps/worker/src/flows/flow-engine.ts.
+export const QUEUE_FLOW_STEPS = "flow-steps";
+
+export interface FlowStepJob {
+  runId: string;
+  token: string;
+  // "continue" resumes after a wait item; "noReply" follows the block's no-reply arrow.
+  kind: "continue" | "noReply";
+}
+
+export type FlowWaitUnit = "seconds" | "minutes" | "hours" | "days";
+
+// What a "Mensagem" block sends, in order. A question or buttons item stops the block until she
+// answers; buttons must be the block's last item (each button has its own arrow out).
+export type FlowItem =
+  | { id: string; kind: "text"; text: string }
+  | { id: string; kind: "media"; mediaType: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"; url: string; caption?: string; fileName?: string }
+  | { id: string; kind: "wait"; amount: number; unit: FlowWaitUnit }
+  | { id: string; kind: "question"; text: string; saveTo: "name" | "objective" | "note" | "none" }
+  | { id: string; kind: "buttons"; text: string; buttons: { id: string; label: string }[] }
+  | { id: string; kind: "link"; text: string; label: string; url: string };
+
+export type FlowAction =
+  | { kind: "addTag"; tag: string }
+  | { kind: "removeTag"; tag: string }
+  | { kind: "moveStage"; stageId: string }
+  // Ends the flow and lets the AI assistant take the conversation from here.
+  | { kind: "startAi" }
+  // Ends the flow, switches the AI off and leaves a note for the team (conversation marked unread).
+  | { kind: "handoff"; note: string };
+
+export type FlowNode =
+  | { id: string; type: "trigger"; position: { x: number; y: number }; data: { keywords: string[] } }
+  | {
+      id: string;
+      type: "message";
+      position: { x: number; y: number };
+      data: { title?: string; items: FlowItem[]; noReplyAfter?: { amount: number; unit: FlowWaitUnit } };
+    }
+  | { id: string; type: "action"; position: { x: number; y: number }; data: { title?: string; actions: FlowAction[] } };
+
+// sourceHandle: "next", "noReply" or "btn:<button id>".
+export interface FlowEdge {
+  id: string;
+  source: string;
+  sourceHandle: string;
+  target: string;
+}
+
+export interface FlowGraph {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+}
+
+export const FLOW_WAIT_UNIT_MS: Record<FlowWaitUnit, number> = {
+  seconds: 1000,
+  minutes: 60 * 1000,
+  hours: 60 * 60 * 1000,
+  days: 24 * 60 * 60 * 1000,
+};
+
+// WhatsApp's own limits for reply buttons (Cloud API): at most 3, titles up to 20 characters.
+export const FLOW_MAX_BUTTONS = 3;
+export const FLOW_BUTTON_LABEL_MAX = 20;
+
 export interface TranscribeAudioJob {
   organizationId: string;
   messageId: string;
@@ -195,9 +262,15 @@ export interface OutboundMessageJob {
   // Present only for campaign sends — the worker updates this CampaignRecipient's status
   // (SENT/FAILED) after attempting the send, alongside the regular Message it always creates.
   campaignRecipientId?: string;
-  // Show "digitando…" to the contact for this long before sending (Baileys only; the AI
-  // assistant sets it so its replies don't land out of nowhere).
+  // Show "digitando…" to the contact for this long before sending (the AI assistant sets it so
+  // its replies don't land out of nowhere). On Cloud API it needs typingForWaMessageId: Meta shows
+  // the indicator as a reaction to her last message (and marks it read).
   typingMs?: number;
+  typingForWaMessageId?: string;
+  // Interactive messages (Funil). Cloud API sends real reply buttons / a link button; Baileys gets
+  // the same thing as plain text (numbered options, or the link written out).
+  buttons?: { id: string; title: string }[];
+  ctaUrl?: { label: string; url: string };
 }
 
 // A multi-step quick reply (e.g. text, then a document, then a follow-up text) is sent as

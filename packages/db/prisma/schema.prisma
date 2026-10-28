@@ -124,38 +124,39 @@ model Organization {
   // null disables the assistant. aiPrompt is the org's own instructions (tone, what it may
   // say, when to hand off); the fixed safety rules and the AiPlan list are added around it
   // when the system prompt is built (see ai-assistant/ai-prompt.ts).
-  anthropicApiKey String?
-  aiPrompt        String  @default("")
+  anthropicApiKey      String?
+  aiPrompt             String  @default("")
   // Master switch for real WhatsApp replies (the simulator works either way). Off by default so
   // nothing is ever sent to a customer until the owner turns it on in the AI tab.
-  aiEnabled Boolean @default(false)
+  aiEnabled            Boolean @default(false)
   // Pré-consulta scheduling link the assistant sends once the questionnaire is answered — kept
   // apart from AiLink because the conversation flow depends on it, and switchable on its own.
-  aiSchedulingUrl     String?
-  aiSchedulingEnabled Boolean @default(false)
+  aiSchedulingUrl      String?
+  aiSchedulingEnabled  Boolean @default(false)
   // Funnel stages the assistant moves a lead through (Início Atendimento → Qualificando →
   // Negociação), picked by the owner in the AI tab. Null = the assistant doesn't move deals.
   aiStageStartId       String?
   aiStageQualifyingId  String?
   aiStageNegotiationId String?
 
-  aiPlans          AiPlan[]
-  aiLinks          AiLink[]
-  aiKeywords       AiKeyword[]
-  memberships      Membership[]
-  whatsappSessions WhatsappSession[]
-  contacts         Contact[]
-  conversations    Conversation[]
-  autoTagRules     AutoTagRule[]
-  pipelines        Pipeline[]
-  deals            Deal[]
-  notes            Note[]
+  aiPlans              AiPlan[]
+  aiLinks              AiLink[]
+  aiKeywords           AiKeyword[]
+  flows                Flow[]
+  memberships          Membership[]
+  whatsappSessions     WhatsappSession[]
+  contacts             Contact[]
+  conversations        Conversation[]
+  autoTagRules         AutoTagRule[]
+  pipelines            Pipeline[]
+  deals                Deal[]
+  notes                Note[]
   quickReplyCategories QuickReplyCategory[]
-  quickReplies     QuickReply[]
-  tags             Tag[]
-  scheduledMessages ScheduledMessage[]
-  messageTemplates MessageTemplate[]
-  campaigns        Campaign[]
+  quickReplies         QuickReply[]
+  tags                 Tag[]
+  scheduledMessages    ScheduledMessage[]
+  messageTemplates     MessageTemplate[]
+  campaigns            Campaign[]
 }
 
 model User {
@@ -170,17 +171,17 @@ model User {
   signatureEnabled Boolean @default(true)
   signatureName    String?
 
-  memberships          Membership[]
-  assignedConversations Conversation[] @relation("AssignedAgent")
-  assignedDeals        Deal[]         @relation("AssignedAgent")
-  sentMessages         Message[]      @relation("SentBy")
-  scheduledMessages    ScheduledMessage[]
+  memberships           Membership[]
+  assignedConversations Conversation[]     @relation("AssignedAgent")
+  assignedDeals         Deal[]             @relation("AssignedAgent")
+  sentMessages          Message[]          @relation("SentBy")
+  scheduledMessages     ScheduledMessage[]
 }
 
 model Membership {
-  id             String   @id @default(cuid())
-  role           Role     @default(AGENT)
-  createdAt      DateTime @default(now())
+  id        String   @id @default(cuid())
+  role      Role     @default(AGENT)
+  createdAt DateTime @default(now())
 
   // Only meaningful for AGENT — OWNER/ADMIN always have full access regardless of this list.
   // One flat on/off switch per module key (see MODULE_KEYS in @crm/shared), no separate
@@ -226,18 +227,18 @@ model WhatsappSession {
   // so Campaigns/Templates need it in addition to cloudApiPhoneNumberId.
   cloudApiWabaId             String?
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Soft-delete: "removing" a connection (e.g. an employee's number leaving the team) must
   // never cascade-delete the Conversations/Messages that already went through it — that history
   // stays forever. Deleting just logs the session out and hides it from the active list.
   archivedAt DateTime?
 
-  organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  conversations  Conversation[]
-  whatsappLabels WhatsappLabel[]
+  organizationId   String
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations    Conversation[]
+  whatsappLabels   WhatsappLabel[]
   messageTemplates MessageTemplate[]
   campaigns        Campaign[]
 
@@ -255,13 +256,13 @@ model Contact {
   // qualification and editable by the team.
   objective   String?
 
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  conversations  Conversation[]
-  deals          Deal[]
-  notes          Note[]
-  tags           ContactTag[]
-  whatsappLabels ContactWhatsappLabel[]
+  organizationId     String
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations      Conversation[]
+  deals              Deal[]
+  notes              Note[]
+  tags               ContactTag[]
+  whatsappLabels     ContactWhatsappLabel[]
   campaignRecipients CampaignRecipient[]
 
   @@unique([organizationId, waJid])
@@ -279,7 +280,7 @@ model Tag {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  contacts ContactTag[]
+  contacts     ContactTag[]
   autoTagRules AutoTagRuleTag[]
 
   @@unique([organizationId, name])
@@ -317,7 +318,7 @@ model WhatsappLabel {
 
 model ContactWhatsappLabel {
   contactId String
-  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact   Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
   labelId   String
   label     WhatsappLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
 
@@ -391,11 +392,11 @@ model QuickReplyStep {
 }
 
 model Conversation {
-  id            String              @id @default(cuid())
-  lastMessageAt DateTime            @default(now())
-  unreadCount   Int                 @default(0)
-  status        ConversationStatus  @default(OPEN)
-  createdAt     DateTime            @default(now())
+  id            String             @id @default(cuid())
+  lastMessageAt DateTime           @default(now())
+  unreadCount   Int                @default(0)
+  status        ConversationStatus @default(OPEN)
+  createdAt     DateTime           @default(now())
   // AI assistant for this conversation: null = automatic (it switches on when a message matches
   // an AiKeyword, or for a patient whose plan expired), true/false = set by the Inbox toggle.
   // An attendant replying, or the assistant handing off, sets it to false.
@@ -413,21 +414,22 @@ model Conversation {
   assignedUserId String?
   assignedUser   User?   @relation("AssignedAgent", fields: [assignedUserId], references: [id])
 
-  messages Message[]
+  messages          Message[]
   scheduledMessages ScheduledMessage[]
+  flowRuns          FlowRun[]
 
   @@unique([whatsappSessionId, contactId])
   @@index([organizationId])
 }
 
 model ScheduledMessage {
-  id           String                 @id @default(cuid())
-  content      String
-  scheduledFor DateTime
-  status       ScheduledMessageStatus @default(PENDING)
+  id            String                 @id @default(cuid())
+  content       String
+  scheduledFor  DateTime
+  status        ScheduledMessageStatus @default(PENDING)
   sentMessageId String?
-  error        String?
-  createdAt    DateTime               @default(now())
+  error         String?
+  createdAt     DateTime               @default(now())
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -436,7 +438,7 @@ model ScheduledMessage {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   createdByUserId String?
-  createdByUser   User? @relation(fields: [createdByUserId], references: [id])
+  createdByUser   User?   @relation(fields: [createdByUserId], references: [id])
 
   @@index([conversationId])
   @@index([organizationId])
@@ -467,21 +469,21 @@ model AutoTagRuleTag {
   ruleId String
   rule   AutoTagRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
   tagId  String
-  tag    Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag    Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([ruleId, tagId])
   @@index([tagId])
 }
 
 model Message {
-  id            String            @id @default(cuid())
-  direction     MessageDirection
-  type          MessageType       @default(TEXT)
-  content       String?
-  mediaUrl      String?
-  waMessageId   String?
-  status        MessageStatus     @default(PENDING)
-  createdAt     DateTime          @default(now())
+  id          String           @id @default(cuid())
+  direction   MessageDirection
+  type        MessageType      @default(TEXT)
+  content     String?
+  mediaUrl    String?
+  waMessageId String?
+  status      MessageStatus    @default(PENDING)
+  createdAt   DateTime         @default(now())
 
   // Set when WhatsApp reports this message was deleted (revoked) by whoever sent it.
   // `content`/`mediaUrl` are deliberately left untouched — we already have our own copy
@@ -498,6 +500,8 @@ model Message {
   sentByUser   User?   @relation("SentBy", fields: [sentByUserId], references: [id])
   // Sent by the AI assistant (shown with its own label in the Inbox).
   sentByAi     Boolean @default(false)
+  // Sent by a Funil automation flow (also labelled in the Inbox).
+  sentByFlow   Boolean @default(false)
 
   campaignRecipient CampaignRecipient?
 
@@ -637,20 +641,20 @@ model DealFollowUpContact {
 // outside the 24h customer-service window — Meta reviews and approves/rejects each one before
 // it can be used in a Campaign.
 model MessageTemplate {
-  id              String          @id @default(cuid())
-  name            String          // Meta's format: lowercase + underscores only
+  id              String           @id @default(cuid())
+  name            String // Meta's format: lowercase + underscores only
   category        TemplateCategory
-  language        String          @default("pt_BR")
-  bodyText        String          // may contain {{1}}, {{2}}... (Meta's numbered placeholders)
-  variableCount   Int             @default(0)
+  language        String           @default("pt_BR")
+  bodyText        String // may contain {{1}}, {{2}}... (Meta's numbered placeholders)
+  variableCount   Int              @default(0)
   // Meta requires a sample value per {{n}} placeholder to approve a template — without it,
   // submission is rejected with INVALID_FORMAT. Ordered to match {{1}}, {{2}}...
-  bodyExamples    String[]        @default([])
+  bodyExamples    String[]         @default([])
   metaTemplateId  String?
-  status          TemplateStatus  @default(DRAFT)
+  status          TemplateStatus   @default(DRAFT)
   rejectionReason String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -665,29 +669,29 @@ model MessageTemplate {
 }
 
 model Campaign {
-  id            String         @id @default(cuid())
-  name          String
-  status        CampaignStatus @default(DRAFT)
-  audienceType  CampaignAudienceType
+  id                 String               @id @default(cuid())
+  name               String
+  status             CampaignStatus       @default(DRAFT)
+  audienceType       CampaignAudienceType
   // Exactly one of these is set, matching audienceType; all empty/null for ALL.
-  audienceTagId    String?
-  audienceLabelId  String?
-  audienceContactIds String[] @default([])
+  audienceTagId      String?
+  audienceLabelId    String?
+  audienceContactIds String[]             @default([])
   // One entry per {{1}}, {{2}}... of the template, in order — Meta rejects the whole send
   // (#132000) if the count doesn't match. Each may contain contact tags ({{nome}},
   // {{telefone}}), resolved per recipient at dispatch time (see renderCampaignParam).
-  templateParams String[] @default([])
+  templateParams     String[]             @default([])
   // Locked in at send time (recipientCount × the org's price-per-message at that moment), so
   // editing the price table later doesn't retroactively change what a past campaign "cost".
-  estimatedCost Decimal?
-  createdAt     DateTime  @default(now())
+  estimatedCost      Decimal?
+  createdAt          DateTime             @default(now())
   // Set only when the send was scheduled for later rather than fired immediately — the
   // campaign sits at status SCHEDULED until the delayed dispatch job fires (see
   // QUEUE_CAMPAIGN_DISPATCH), same "delayed BullMQ job, jobId = row id" pattern as
   // ScheduledMessage, so it can be cancelled the same way.
-  scheduledFor  DateTime?
-  startedAt     DateTime?
-  finishedAt    DateTime?
+  scheduledFor       DateTime?
+  startedAt          DateTime?
+  finishedAt         DateTime?
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -704,10 +708,10 @@ model Campaign {
 }
 
 model CampaignRecipient {
-  id        String                   @id @default(cuid())
-  status    CampaignRecipientStatus  @default(PENDING)
+  id        String                  @id @default(cuid())
+  status    CampaignRecipientStatus @default(PENDING)
   error     String?
-  createdAt DateTime                 @default(now())
+  createdAt DateTime                @default(now())
 
   campaignId String
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -717,7 +721,7 @@ model CampaignRecipient {
 
   // Set once the send fires — Message.status (updated by the existing Cloud API status
   // webhook) is what actually tracks sent/delivered/read/failed from then on.
-  messageId String? @unique
+  messageId String?  @unique
   message   Message? @relation(fields: [messageId], references: [id])
 
   @@unique([campaignId, contactId])
@@ -732,7 +736,7 @@ model AiPlan {
   name        String
   price       Decimal
   description String   @default("")
-  link        String?  // payment / scheduling link the assistant can send
+  link        String? // payment / scheduling link the assistant can send
   order       Int      @default(0)
   createdAt   DateTime @default(now())
 
@@ -771,4 +775,55 @@ model AiLink {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+}
+
+// Funil: automação de fluxo (estilo ManyChat). `graph` is the editor's drawing — blocks and the
+// arrows between them (see FlowGraph in @crm/shared). triggerKeywords is copied from the trigger
+// block on save so the worker can match an inbound message without parsing every graph.
+model Flow {
+  id              String   @id @default(cuid())
+  name            String
+  active          Boolean  @default(false)
+  triggerKeywords String[] @default([])
+  graph           Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  runs           FlowRun[]
+
+  @@index([organizationId])
+}
+
+enum FlowRunStatus {
+  RUNNING
+  WAITING
+  DONE
+  STOPPED
+}
+
+// One contact going through a flow: which block and which item inside it comes next. A
+// conversation has at most one RUNNING/WAITING run; while it does, the AI assistant stays quiet.
+model FlowRun {
+  id         String        @id @default(cuid())
+  status     FlowRunStatus @default(RUNNING)
+  nodeId     String
+  step       Int           @default(0)
+  // Only the scheduled job carrying this token may move the run forward — a reply or a newer
+  // job rotates it, so a stale timer (e.g. "no reply in 1h" after she did reply) does nothing.
+  token      String?
+  startedAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  finishedAt DateTime?
+
+  flowId         String
+  flow           Flow         @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  organizationId String
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contactId      String
+
+  @@index([conversationId, status])
+  @@index([flowId, status])
 }

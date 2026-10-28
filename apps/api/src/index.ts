@@ -24,6 +24,7 @@ import { webhooksRouter } from "./modules/webhooks/webhooks.routes";
 import { templatesRouter } from "./modules/templates/templates.routes";
 import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
 import { aiAssistantRouter } from "./modules/ai-assistant/ai-assistant.routes";
+import { flowsRouter } from "./modules/flows/flows.routes";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
@@ -60,6 +61,7 @@ app.use("/dashboard", dashboardRouter);
 app.use("/templates", templatesRouter);
 app.use("/campaigns", campaignsRouter);
 app.use("/ai-assistant", aiAssistantRouter);
+app.use("/flows", flowsRouter);
 
 app.use(errorHandler);
 

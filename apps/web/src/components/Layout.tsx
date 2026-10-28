@@ -12,6 +12,7 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
   { to: "/inbox", label: "Caixa de Entrada", icon: "chat", module: "inbox" },
   { to: "/contatos", label: "Contatos", icon: "users", module: "contacts" },
   { to: "/kanban", label: "Kanban", icon: "columns", module: "kanban" },
+  { to: "/funil", label: "Funil", icon: "flow", ownerOrAdminOnly: true },
   { to: "/autoatendimento", label: "Autoatendimento", icon: "bot", module: "autoatendimento" },
   { to: "/whatsapp", label: "Conexão WhatsApp", icon: "phone", ownerOrAdminOnly: true },
   { to: "/equipe", label: "Equipe", icon: "team", ownerOrAdminOnly: true },

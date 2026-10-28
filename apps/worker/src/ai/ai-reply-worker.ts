@@ -23,6 +23,7 @@ import {
 import { createRedisClient } from "../redis";
 import { publishRealtimeEvent } from "../pubsub";
 import { isContactTyping } from "./typing";
+import { hasActiveFlowRun } from "../flows/flow-inbound";
 
 const prisma = getPrismaClient();
 
@@ -147,6 +148,8 @@ async function processAiReply(job: AiReplyJob) {
   const org = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
   if (!org.aiEnabled || !org.anthropicApiKey) return;
   if (conversation.aiEnabled === false) return;
+  // A Funil flow started after this reply was scheduled — the flow has the conversation now.
+  if (await hasActiveFlowRun(conversationId)) return;
 
   const deal = await prisma.deal.findFirst({
     where: { organizationId, contactId: conversation.contactId },
@@ -267,6 +270,13 @@ async function sendAiMessage(
   publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message });
   publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
 
+  // Cloud API shows "digitando…" against her last message.
+  const lastInbound = await prisma.message.findFirst({
+    where: { conversationId: conversation.id, direction: MessageDirection.INBOUND, waMessageId: { not: null } },
+    orderBy: { createdAt: "desc" },
+    select: { waMessageId: true },
+  });
+
   await outboundMessagesQueue.add("send", {
     organizationId,
     sessionId: conversation.whatsappSessionId,
@@ -275,6 +285,7 @@ async function sendAiMessage(
     waJid: conversation.contact.waJid,
     text,
     typingMs: typingDuration(text),
+    typingForWaMessageId: lastInbound?.waMessageId ?? undefined,
   });
 }
 

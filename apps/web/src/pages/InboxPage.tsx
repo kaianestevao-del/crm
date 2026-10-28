@@ -55,6 +55,7 @@ interface Message {
   revokedAt: string | null;
   createdAt: string;
   sentByAi?: boolean;
+  sentByFlow?: boolean;
 }
 
 const STATUS_ICON: Record<MessageStatus, string> = {
@@ -138,7 +139,8 @@ function MessageBubble({
   onOpenLightbox: (src: string) => void;
 }) {
   const outbound = message.direction === MessageDirection.OUTBOUND;
-  const mediaSrc = message.mediaUrl ? `${API_URL}${message.mediaUrl}` : null;
+  // Funil media can be an outside link; everything else is a path on the API.
+  const mediaSrc = message.mediaUrl ? (/^https?:\/\//.test(message.mediaUrl) ? message.mediaUrl : `${API_URL}${message.mediaUrl}`) : null;
   const isMediaType = [
     MessageType.IMAGE,
     MessageType.AUDIO,
@@ -240,6 +242,7 @@ function MessageBubble({
       )}
       <p className={`mt-0.5 flex items-center justify-end gap-1 text-[11px] ${outbound ? "text-white/70" : "text-gray-400"}`}>
         {message.sentByAi && <span title="Enviada pela IA">🤖 IA ·</span>}
+        {message.sentByFlow && <span title="Enviada por um fluxo do Funil">⚡ Funil ·</span>}
         {formatMessageTime(message.createdAt)}
         {outbound && message.status === MessageStatus.FAILED && <span>Falha ao enviar</span>}
         {outbound && <MessageStatusIndicator status={message.status} />}

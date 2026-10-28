@@ -21,6 +21,7 @@ import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
 import { onInboundMessageForAi } from "../ai/ai-reply-worker";
 import { setContactPresence } from "../ai/typing";
+import { onInboundMessageForFlows, stopFlowRuns } from "../flows/flow-inbound";
 
 const prisma = getPrismaClient();
 const logger = pino({ level: "warn" });
@@ -525,26 +526,41 @@ async function upsertContactAndRecordMessage(
   // triggers it (it would otherwise re-tag every contact off their oldest messages).
   if (!opts.isHistorical && !fromMe) {
     await maybeAutoTag(organizationId, contact.id, text).catch((err) => console.error("auto_tag_error", err));
-    const aiScheduled = await onInboundMessageForAi(organizationId, conversation.id, contact.id, message).catch((err) => {
-      console.error("ai_inbound_error", err);
+    // A Funil flow the contact is in (or one her message starts) answers instead of the AI.
+    const takenByFlow = await onInboundMessageForFlows(organizationId, conversation.id, contact.id, message).catch((err) => {
+      console.error("flow_inbound_error", err);
       return false;
     });
-    if (aiScheduled) watchContactTyping(sessionId, jid);
+    if (!takenByFlow) {
+      const aiScheduled = await onInboundMessageForAi(organizationId, conversation.id, contact.id, message).catch((err) => {
+        console.error("ai_inbound_error", err);
+        return false;
+      });
+      if (aiScheduled) watchContactTyping(sessionId, jid);
+    }
   }
 
   // Someone answered from the phone itself (Baileys only — Cloud API never echoes our sends): same
-  // as an attendant replying in the Inbox, the AI assistant stops answering this conversation.
-  // The assistant's own sends can echo back here before their waMessageId is saved — those
-  // don't count as someone stepping in.
-  const ownAiEcho =
+  // as an attendant replying in the Inbox, the AI assistant stops answering this conversation and
+  // a Funil flow running in it stops. The assistant's own sends can echo back here before their waMessageId is saved — those
+  // don't count as someone stepping in (same for a Funil flow's sends).
+  const ownAutomatedEcho =
     fromMe &&
     !!(await prisma.message.findFirst({
-      where: { conversationId: conversation.id, sentByAi: true, content: text, createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
+      where: {
+        conversationId: conversation.id,
+        OR: [{ sentByAi: true }, { sentByFlow: true }],
+        content: text,
+        createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+      },
       select: { id: true },
     }));
-  if (!opts.isHistorical && fromMe && !ownAiEcho && conversation.aiEnabled !== false) {
-    await prisma.conversation.update({ where: { id: conversation.id }, data: { aiEnabled: false } });
-    publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+  if (!opts.isHistorical && fromMe && !ownAutomatedEcho) {
+    await stopFlowRuns(conversation.id).catch((err) => console.error("stop_flow_runs_error", err));
+    if (conversation.aiEnabled !== false) {
+      await prisma.conversation.update({ where: { id: conversation.id }, data: { aiEnabled: false } });
+      publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+    }
   }
 }
 
@@ -767,6 +783,24 @@ async function sendCloudApiMessage(
     payload = { type: "audio", audio: { link: job.mediaUrl } };
   } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
     payload = { type: "document", document: { link: job.mediaUrl, filename: job.mediaName ?? "arquivo", caption: job.text } };
+  } else if (job.buttons?.length) {
+    payload = {
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: job.text ?? "" },
+        action: { buttons: job.buttons.map((b) => ({ type: "reply", reply: { id: b.id, title: b.title } })) },
+      },
+    };
+  } else if (job.ctaUrl) {
+    payload = {
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        body: { text: job.text ?? "" },
+        action: { name: "cta_url", parameters: { display_text: job.ctaUrl.label, url: job.ctaUrl.url } },
+      },
+    };
   } else {
     payload = { type: "text", text: { body: job.text ?? "" } };
   }
@@ -794,6 +828,15 @@ async function sendCloudApiMessage(
   if (!result.ok) throw new Error(`cloud_api_send_failed:${JSON.stringify(result.data)}`);
 
   return result.data.messages?.[0]?.id;
+}
+
+// Baileys can't send WhatsApp's interactive messages — buttons go out as numbered options (the
+// Funil also accepts the number as the answer) and a link button as the link written out.
+export function interactiveAsText(job: Pick<OutboundMessageJob, "text" | "buttons" | "ctaUrl">) {
+  const text = job.text ?? "";
+  if (job.buttons?.length) return `${text}\n\n${job.buttons.map((b, i) => `*${i + 1}.* ${b.title}`).join("\n")}`;
+  if (job.ctaUrl) return `${text}\n\n${job.ctaUrl.label}: ${job.ctaUrl.url}`;
+  return text;
 }
 
 // Same payload on both endpoints — /marketing_messages (Marketing Messages API) only accepts
@@ -826,6 +869,21 @@ export async function sendOutboundMessage(job: OutboundMessageJob) {
       if (!session.cloudApiPhoneNumberId || !session.cloudApiAccessToken) {
         throw new Error(`cloud_api_not_configured:${job.sessionId}`);
       }
+      if (job.typingMs && job.typingForWaMessageId) {
+        // Meta's typing indicator rides on "mark her last message as read"; it stays up until we
+        // send or for 25s at most.
+        await postCloudApiMessage(
+          { cloudApiPhoneNumberId: session.cloudApiPhoneNumberId, cloudApiAccessToken: session.cloudApiAccessToken },
+          "messages",
+          {
+            messaging_product: "whatsapp",
+            status: "read",
+            message_id: job.typingForWaMessageId,
+            typing_indicator: { type: "text" },
+          },
+        ).catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, job.typingMs));
+      }
       waMessageId = await sendCloudApiMessage(job, {
         cloudApiPhoneNumberId: session.cloudApiPhoneNumberId,
         cloudApiAccessToken: session.cloudApiAccessToken,
@@ -848,7 +906,7 @@ export async function sendOutboundMessage(job: OutboundMessageJob) {
       } else if (job.mediaType === "DOCUMENT" && job.mediaUrl) {
         content = { document: { url: job.mediaUrl }, mimetype, fileName: job.mediaName ?? "arquivo", caption: job.text };
       } else {
-        content = { text: job.text ?? "" };
+        content = { text: interactiveAsText(job) };
       }
 
       if (job.typingMs) {
@@ -911,9 +969,13 @@ function detectCloudMessageType(type: string): MessageType {
     case "sticker":
       return MessageType.STICKER;
     case "text":
+    // A tapped reply button (interactive) or template quick-reply button — recorded as the text
+    // she tapped, which is also what the Funil matches the answer by.
+    case "interactive":
+    case "button":
       return MessageType.TEXT;
     default:
-      // reaction/button/interactive/order/system/etc. — no renderer for these yet, but at
+      // reaction/order/order/system/etc. — no renderer for these yet, but at
       // least the message shows up (as "Mensagem não suportada") instead of vanishing.
       return MessageType.UNKNOWN;
   }
@@ -977,6 +1039,8 @@ interface CloudApiMessage {
   timestamp: string;
   type: string;
   text?: { body?: string };
+  interactive?: { type?: string; button_reply?: { id: string; title: string }; list_reply?: { id: string; title: string } };
+  button?: { text?: string; payload?: string };
   image?: { id: string; caption?: string; mime_type?: string };
   video?: { id: string; caption?: string; mime_type?: string };
   audio?: { id: string; mime_type?: string };
@@ -1049,6 +1113,9 @@ export async function processInboundCloudMessage(job: InboundCloudMessageJob) {
     }
     const text =
       m.text?.body ??
+      m.interactive?.button_reply?.title ??
+      m.interactive?.list_reply?.title ??
+      m.button?.text ??
       m.image?.caption ??
       m.video?.caption ??
       m.document?.caption ??
