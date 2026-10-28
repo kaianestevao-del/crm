@@ -82,7 +82,7 @@ export function SettingsPage() {
     <div className="h-full overflow-y-auto bg-gray-50 p-6">
       <h1 className="mb-1 text-lg font-semibold text-gray-900">Configurações</h1>
       <p className="mb-6 max-w-2xl text-sm text-gray-500">
-        Ajustes gerais da organização usados pelo Dashboard e pelo Funil.
+        Ajustes gerais da organização usados pelo Dashboard e pelo Kanban.
       </p>
 
       <div className="max-w-2xl space-y-6">
@@ -90,7 +90,7 @@ export function SettingsPage() {
           <p className="mb-1 text-sm font-medium">Meta de mensagens no Follow-up</p>
           <p className="mb-3 text-xs text-gray-500">
             Quantidade de mensagens que conta como "completar" a sequência de follow-up de um lead — aparece como
-            "X de N" nos cards do Funil.
+            "X de N" nos cards do Kanban.
           </p>
           <div className="flex items-center gap-2">
             <input
@@ -144,7 +144,7 @@ export function SettingsPage() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="mb-1 text-sm font-medium">Papel das etapas do Funil</p>
+          <p className="mb-1 text-sm font-medium">Papel das etapas do Kanban</p>
           <p className="mb-3 text-xs text-gray-500">
             Diz ao Dashboard o que cada etapa representa (paciente ativo, vencido, follow-up ou perdido), para
             calcular as métricas corretamente — não muda o nome nem a ordem da etapa.

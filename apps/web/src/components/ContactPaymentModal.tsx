@@ -82,7 +82,7 @@ export function ContactPaymentModal({
             </p>
             {done === "no_stage" && (
               <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                Nenhuma etapa do funil está marcada como “Paciente Ativa” (Configurações), então a etapa não foi alterada.
+                Nenhuma etapa do Kanban está marcada como “Paciente Ativa” (Configurações), então a etapa não foi alterada.
               </p>
             )}
             <div className="mt-4 flex justify-end">
@@ -134,7 +134,7 @@ export function ContactPaymentModal({
             />
             <label className="mb-3 flex items-center gap-2 text-xs text-gray-600">
               <input type="checkbox" checked={markActive} onChange={(e) => setMarkActive(e.target.checked)} />
-              Marcar como Paciente Ativa no funil
+              Marcar como Paciente Ativa no Kanban
             </label>
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex justify-end gap-2">

@@ -149,25 +149,25 @@ export function ContactDeal({ contactId }: { contactId: string }) {
       <select
         value={deal?.stageId ?? ""}
         onChange={(e) => handleStageChange(e.target.value)}
-        title="Etapa no funil"
+        title="Etapa no Kanban"
         className={`rounded-full border px-2 py-0.5 text-xs focus:outline-none ${
           deal?.stageId ? "border-brand bg-brand/10 text-brand-dark" : "border-dashed border-gray-300 bg-white text-gray-500"
         }`}
       >
         <option value="" disabled>
-          📊 Funil: selecionar etapa
+          📊 Kanban: selecionar etapa
         </option>
         {stages.map((stage) => (
           <option key={stage.id} value={stage.id}>
             📊 {stage.name}
           </option>
         ))}
-        {deal && <option value={REMOVE_FROM_PIPELINE}>✕ Remover do funil</option>}
+        {deal && <option value={REMOVE_FROM_PIPELINE}>✕ Remover do Kanban</option>}
       </select>
 
       {confirmRemove && deal && (
         <span className="flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700">
-          {deal.payments.length > 0 ? "Remover do funil (apaga os lançamentos)?" : "Remover do funil?"}
+          {deal.payments.length > 0 ? "Remover do Kanban (apaga os lançamentos)?" : "Remover do Kanban?"}
           <button type="button" onClick={handleRemoveFromPipeline} className="font-medium hover:underline">
             Confirmar
           </button>

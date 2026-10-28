@@ -217,7 +217,7 @@ function StagesCard({
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <p className="mb-1 text-sm font-medium">Etapas do funil</p>
+      <p className="mb-1 text-sm font-medium">Etapas do Kanban</p>
       <p className="mb-3 text-xs text-gray-500">
         A IA move o card da paciente por estas etapas conforme a conversa avança (só para frente), e cria o card se ela
         ainda não tiver. Cards em qualquer outra etapa não são mexidos.
@@ -759,7 +759,7 @@ function Simulator() {
               )}
               {turn.costUsd !== undefined && (
                 <p className="text-right text-[11px] text-gray-500">
-                  {turn.stage && `Funil: ${STAGE_LABELS[turn.stage] ?? turn.stage}`}
+                  {turn.stage && `Kanban: ${STAGE_LABELS[turn.stage] ?? turn.stage}`}
                   {turn.objective && ` · Objetivo: ${turn.objective}`}
                   <br />≈ US$ {turn.costUsd.toFixed(4)}
                   {turn.cacheReadTokens ? " · prompt em cache" : ""}

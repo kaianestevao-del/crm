@@ -8,10 +8,10 @@ import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 
 const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey; ownerOrAdminOnly?: boolean }[] = [
+  { to: "/dashboard", label: "Dashboard", icon: "grid", module: "dashboard" },
   { to: "/inbox", label: "Caixa de Entrada", icon: "chat", module: "inbox" },
   { to: "/contatos", label: "Contatos", icon: "users", module: "contacts" },
-  { to: "/dashboard", label: "Dashboard", icon: "grid", module: "dashboard" },
-  { to: "/kanban", label: "Funil", icon: "columns", module: "kanban" },
+  { to: "/kanban", label: "Kanban", icon: "columns", module: "kanban" },
   { to: "/autoatendimento", label: "Autoatendimento", icon: "bot", module: "autoatendimento" },
   { to: "/whatsapp", label: "Conexão WhatsApp", icon: "phone", ownerOrAdminOnly: true },
   { to: "/equipe", label: "Equipe", icon: "team", ownerOrAdminOnly: true },

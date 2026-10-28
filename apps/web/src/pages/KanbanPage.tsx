@@ -116,7 +116,7 @@ export function KanbanPage() {
     try {
       await api.patch(`/pipelines/deals/${dealId}/move`, { stageId, order: index });
     } catch {
-      setBoardError("Não foi possível mover o lead. O funil foi recarregado — tente de novo.");
+      setBoardError("Não foi possível mover o lead. O Kanban foi recarregado — tente de novo.");
       await refresh();
     }
   }
@@ -189,14 +189,14 @@ export function KanbanPage() {
     );
   }
 
-  if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando funil...</div>;
+  if (!pipeline) return <div className="p-6 text-sm text-gray-500">Carregando Kanban...</div>;
 
   return (
     <div className="flex h-full flex-col bg-gray-50 p-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">{pipeline.name}</h1>
-          <p className="text-sm text-gray-500">Acompanhe e gerencie seu funil de vendas.</p>
+          <p className="text-sm text-gray-500">Acompanhe e gerencie as etapas do Kanban.</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -406,7 +406,7 @@ export function KanbanPage() {
                               value={deal.stageId}
                               onMouseDown={(e) => e.stopPropagation()}
                               onChange={(e) => handleChangeDealStage(deal, e.target.value)}
-                              title="Mudar etapa do funil"
+                              title="Mudar etapa do Kanban"
                               className="mt-2 w-full rounded-full border border-brand bg-brand/10 px-2 py-0.5 text-xs text-brand-dark focus:outline-none"
                             >
                               {pipeline.stages.map((s) => (
@@ -445,7 +445,7 @@ export function KanbanPage() {
                                 <button
                                   onMouseDown={(e) => e.stopPropagation()}
                                   onClick={() => setConfirmDeleteDealId(deal.id)}
-                                  title="Excluir cliente do funil"
+                                  title="Excluir cliente do Kanban"
                                   className="text-xs font-medium text-red-600 hover:underline"
                                 >
                                   Excluir
