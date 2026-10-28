@@ -5,6 +5,7 @@ import {
   listContacts,
   createContact,
   updateContactName,
+  updateContactObjective,
   listContactNotes,
   createContactNote,
   addContactTag,
@@ -21,6 +22,7 @@ contactsRouter.get("/", asyncHandler(listContacts));
 contactsRouter.get("/export", asyncHandler(exportContacts));
 contactsRouter.post("/", asyncHandler(createContact));
 contactsRouter.patch("/:id", asyncHandler(updateContactName));
+contactsRouter.patch("/:id/objective", asyncHandler(updateContactObjective));
 contactsRouter.get("/:id/notes", asyncHandler(listContactNotes));
 contactsRouter.post("/:id/notes", asyncHandler(createContactNote));
 contactsRouter.post("/:id/tags", asyncHandler(addContactTag));

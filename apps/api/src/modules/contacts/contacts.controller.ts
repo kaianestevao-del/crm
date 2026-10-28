@@ -60,6 +60,19 @@ export async function updateContactName(req: Request, res: Response) {
   res.json(updated);
 }
 
+const updateObjectiveSchema = z.object({ objective: z.string() });
+
+// The contact's objective ("emagrecer 10 kg"...) — filled in by the AI assistant, editable here.
+export async function updateContactObjective(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const input = updateObjectiveSchema.parse(req.body);
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId } });
+  if (!contact) throw new HttpError(404, "contact_not_found");
+
+  const updated = await prisma.contact.update({ where: { id: contact.id }, data: { objective: input.objective.trim() || null } });
+  res.json(updated);
+}
+
 export async function listContactNotes(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const contact = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId } });

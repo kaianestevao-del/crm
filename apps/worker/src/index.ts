@@ -15,6 +15,7 @@ import { createLabelCommandsWorker } from "./queues/label-commands-worker";
 import { createScheduledMessagesWorker } from "./queues/scheduled-messages-worker";
 import { createInboundCloudMessagesWorker } from "./queues/inbound-cloud-messages-worker";
 import { createCampaignDispatchWorker } from "./queues/campaign-dispatch-worker";
+import { createAiReplyWorker } from "./ai/ai-reply-worker";
 import { createDailyBackupWorker, scheduleDailyBackup } from "./backup/daily-backup-worker";
 
 async function main() {
@@ -25,6 +26,7 @@ async function main() {
   createScheduledMessagesWorker();
   createInboundCloudMessagesWorker();
   createCampaignDispatchWorker();
+  createAiReplyWorker();
   createDailyBackupWorker();
   await scheduleDailyBackup();
 

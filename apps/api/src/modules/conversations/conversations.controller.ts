@@ -261,7 +261,12 @@ export async function sendMessage(req: Request, res: Response) {
     ),
   );
 
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+  // An attendant stepped in — the AI assistant stops answering this conversation until someone
+  // switches it back on from the Inbox toggle, so the two never talk over each other.
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date(), aiEnabled: false } });
+  if (conversation.aiEnabled !== false) {
+    publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
+  }
 
   // The signature belongs only at the end of the whole sequence, not after every part.
   const lastTextIndex = parts.reduce((acc, p, i) => (p.type === MessageType.TEXT ? i : acc), -1);
@@ -349,7 +354,12 @@ export async function sendAttachment(req: Request, res: Response) {
     },
   });
 
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+  // An attendant stepped in — the AI assistant stops answering this conversation until someone
+  // switches it back on from the Inbox toggle, so the two never talk over each other.
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date(), aiEnabled: false } });
+  if (conversation.aiEnabled !== false) {
+    publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
+  }
 
   await outboundMessagesQueue.add("send", {
     organizationId: auth.organizationId,
@@ -391,6 +401,19 @@ export async function closeConversation(req: Request, res: Response) {
   const conversation = await getOwnedConversation(req.auth!.organizationId, req.params.id);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "CLOSED" } });
   res.json({ ok: true });
+}
+
+const aiToggleSchema = z.object({ enabled: z.boolean() });
+
+// Inbox toggle for the AI assistant on this one conversation (the org-wide switch lives in the
+// AI tab and still has to be on for anything to be sent).
+export async function setConversationAi(req: Request, res: Response) {
+  const auth = req.auth!;
+  const { enabled } = aiToggleSchema.parse(req.body);
+  const conversation = await getOwnedConversation(auth.organizationId, req.params.id);
+  const updated = await prisma.conversation.update({ where: { id: conversation.id }, data: { aiEnabled: enabled } });
+  publishRealtimeEvent({ type: "conversation.updated", organizationId: auth.organizationId, conversationId: conversation.id });
+  res.json({ aiEnabled: updated.aiEnabled });
 }
 
 const assignSchema = z.object({ userId: z.string().nullable() });

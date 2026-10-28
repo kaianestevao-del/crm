@@ -27,6 +27,7 @@ interface Contact {
   name: string | null;
   phoneNumber: string;
   avatarUrl: string | null;
+  objective: string | null;
   tags: Tag[];
   whatsappLabels: WhatsappLabel[];
 }
@@ -37,6 +38,8 @@ interface Conversation {
   assignedUser: { id: string; name: string } | null;
   unreadCount: number;
   lastMessageAt: string;
+  // AI assistant on this conversation: null = automatic (keyword / expired patient), see the API.
+  aiEnabled: boolean | null;
   messages: Message[];
 }
 
@@ -51,6 +54,7 @@ interface Message {
   transcript: string | null;
   revokedAt: string | null;
   createdAt: string;
+  sentByAi?: boolean;
 }
 
 const STATUS_ICON: Record<MessageStatus, string> = {
@@ -235,11 +239,57 @@ function MessageBubble({
         <p className="whitespace-pre-wrap">{message.content}</p>
       )}
       <p className={`mt-0.5 flex items-center justify-end gap-1 text-[11px] ${outbound ? "text-white/70" : "text-gray-400"}`}>
+        {message.sentByAi && <span title="Enviada pela IA">🤖 IA ·</span>}
         {formatMessageTime(message.createdAt)}
         {outbound && message.status === MessageStatus.FAILED && <span>Falha ao enviar</span>}
         {outbound && <MessageStatusIndicator status={message.status} />}
       </p>
     </div>
+  );
+}
+
+// The contact's objective — filled in by the AI assistant during qualification, editable here.
+function ContactObjective({ contactId, objective, onChange }: { contactId: string; objective: string | null; onChange: (o: string | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  async function save() {
+    const res = await api.patch(`/contacts/${contactId}/objective`, { objective: draft });
+    onChange(res.data.objective);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-gray-500">🎯 Objetivo:</span>
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="w-64 rounded-lg border border-gray-300 px-2 py-0.5 text-xs focus:border-brand focus:outline-none"
+        />
+        <button onClick={save} className="font-medium text-brand-dark hover:underline">
+          Salvar
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={() => {
+        setDraft(objective ?? "");
+        setEditing(true);
+      }}
+      className="text-left text-xs text-gray-600 hover:text-brand-dark"
+      title="Editar objetivo"
+    >
+      🎯 Objetivo: {objective ? <span className="font-medium text-gray-800">{objective}</span> : <span className="text-gray-400">não informado</span>}
+    </button>
   );
 }
 
@@ -495,6 +545,11 @@ export function InboxPage() {
     } finally {
       setSavingContactName(false);
     }
+  }
+
+  async function toggleConversationAi(conversation: Conversation) {
+    const res = await api.post(`/conversations/${conversation.id}/ai`, { enabled: conversation.aiEnabled !== true });
+    setConversations((prev) => prev.map((c) => (c.id === conversation.id ? { ...c, aiEnabled: res.data.aiEnabled } : c)));
   }
 
   async function handleExport() {
@@ -861,6 +916,23 @@ export function InboxPage() {
                 </div>
                 <div className="relative flex gap-2">
                   <button
+                    onClick={() => toggleConversationAi(selectedConversation)}
+                    title={
+                      selectedConversation.aiEnabled === null
+                        ? "Automático: a IA assume se a paciente mandar uma palavra-chave (ou for paciente vencida). Clique para ligar agora."
+                        : selectedConversation.aiEnabled
+                          ? "A IA está respondendo esta conversa. Clique para desligar."
+                          : "A IA não responde esta conversa. Clique para ligar."
+                    }
+                    className={`rounded-xl border px-2 py-1 text-xs font-medium ${
+                      selectedConversation.aiEnabled
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    🤖 IA {selectedConversation.aiEnabled === null ? "automática" : selectedConversation.aiEnabled ? "ligada" : "desligada"}
+                  </button>
+                  <button
                     onClick={handleExport}
                     disabled={exporting}
                     className="rounded-xl border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
@@ -897,6 +969,18 @@ export function InboxPage() {
                     <ScheduledMessages conversationId={selectedConversation.id} onClose={() => setShowScheduledMessages(false)} />
                   )}
                 </div>
+              </div>
+              <div className="mt-2">
+                <ContactObjective
+                  key={selectedConversation.contact.id}
+                  contactId={selectedConversation.contact.id}
+                  objective={selectedConversation.contact.objective}
+                  onChange={(objective) =>
+                    setConversations((prev) =>
+                      prev.map((c) => (c.id === selectedConversation.id ? { ...c, contact: { ...c.contact, objective } } : c)),
+                    )
+                  }
+                />
               </div>
               <div className="mt-2">
                 <ContactTimeline

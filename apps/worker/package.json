@@ -9,6 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@crm/ai": "workspace:*",
     "@crm/db": "workspace:*",
     "@crm/shared": "workspace:*",
     "@hapi/boom": "^10.0.1",

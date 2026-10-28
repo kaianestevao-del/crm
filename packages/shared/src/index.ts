@@ -151,6 +151,17 @@ export const QUEUE_INBOUND_CLOUD_MESSAGES = "inbound-cloud-messages";
 // could enqueue directly in the future without going through the worker's HTTP surface.
 export const QUEUE_TRANSCRIBE_AUDIO = "transcribe-audio";
 
+// AI assistant replies: one delayed job per inbound message (jobId = message id). When it fires,
+// it only answers if that message is still the conversation's latest — so a burst of short
+// messages gets a single reply to all of them, see apps/worker/src/ai/ai-reply-worker.ts.
+export const QUEUE_AI_REPLIES = "ai-replies";
+
+export interface AiReplyJob {
+  organizationId: string;
+  conversationId: string;
+  messageId: string;
+}
+
 export interface TranscribeAudioJob {
   organizationId: string;
   messageId: string;

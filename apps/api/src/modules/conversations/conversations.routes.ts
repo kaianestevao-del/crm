@@ -17,6 +17,7 @@ import {
   previewQuickReply,
   getUnreadCount,
   openConversationByContact,
+  setConversationAi,
 } from "./conversations.controller";
 
 export const conversationsRouter = Router();
@@ -34,5 +35,6 @@ conversationsRouter.post("/:id/attachments", uploadMessageAttachment.single("fil
 conversationsRouter.post("/:id/read", asyncHandler(markAsRead));
 conversationsRouter.post("/:id/unread", asyncHandler(markAsUnread));
 conversationsRouter.delete("/:id", asyncHandler(closeConversation));
+conversationsRouter.post("/:id/ai", asyncHandler(setConversationAi));
 conversationsRouter.post("/:id/assign", asyncHandler(assignConversation));
 conversationsRouter.get("/:id/export", asyncHandler(exportConversation));

@@ -19,6 +19,7 @@ import { META_GRAPH_API_BASE, MONTH_NAMES_PT, type OutboundMessageJob, type Inbo
 import { env } from "../env";
 import { publishRealtimeEvent } from "../pubsub";
 import { transcribeAudioQueue } from "../queues/transcribe-audio-worker";
+import { onInboundMessageForAi } from "../ai/ai-reply-worker";
 
 const prisma = getPrismaClient();
 const logger = pino({ level: "warn" });
@@ -509,6 +510,24 @@ async function upsertContactAndRecordMessage(
   // triggers it (it would otherwise re-tag every contact off their oldest messages).
   if (!opts.isHistorical && !fromMe) {
     await maybeAutoTag(organizationId, contact.id, text).catch((err) => console.error("auto_tag_error", err));
+    await onInboundMessageForAi(organizationId, conversation.id, contact.id, message).catch((err) =>
+      console.error("ai_inbound_error", err),
+    );
+  }
+
+  // Someone answered from the phone itself (Baileys only — Cloud API never echoes our sends): same
+  // as an attendant replying in the Inbox, the AI assistant stops answering this conversation.
+  // The assistant's own sends can echo back here before their waMessageId is saved — those
+  // don't count as someone stepping in.
+  const ownAiEcho =
+    fromMe &&
+    !!(await prisma.message.findFirst({
+      where: { conversationId: conversation.id, sentByAi: true, content: text, createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
+      select: { id: true },
+    }));
+  if (!opts.isHistorical && fromMe && !ownAiEcho && conversation.aiEnabled !== false) {
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { aiEnabled: false } });
+    publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
   }
 }
 

@@ -126,8 +126,22 @@ model Organization {
   // when the system prompt is built (see ai-assistant/ai-prompt.ts).
   anthropicApiKey String?
   aiPrompt        String  @default("")
+  // Master switch for real WhatsApp replies (the simulator works either way). Off by default so
+  // nothing is ever sent to a customer until the owner turns it on in the AI tab.
+  aiEnabled Boolean @default(false)
+  // Pré-consulta scheduling link the assistant sends once the questionnaire is answered — kept
+  // apart from AiLink because the conversation flow depends on it, and switchable on its own.
+  aiSchedulingUrl     String?
+  aiSchedulingEnabled Boolean @default(false)
+  // Funnel stages the assistant moves a lead through (Início Atendimento → Qualificando →
+  // Negociação), picked by the owner in the AI tab. Null = the assistant doesn't move deals.
+  aiStageStartId       String?
+  aiStageQualifyingId  String?
+  aiStageNegotiationId String?
 
   aiPlans          AiPlan[]
+  aiLinks          AiLink[]
+  aiKeywords       AiKeyword[]
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
@@ -237,6 +251,9 @@ model Contact {
   phoneNumber String
   avatarUrl   String?
   createdAt   DateTime @default(now())
+  // What the person wants (e.g. "emagrecer 10 kg"), filled in by the AI assistant during
+  // qualification and editable by the team.
+  objective   String?
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -379,6 +396,10 @@ model Conversation {
   unreadCount   Int                 @default(0)
   status        ConversationStatus  @default(OPEN)
   createdAt     DateTime            @default(now())
+  // AI assistant for this conversation: null = automatic (it switches on when a message matches
+  // an AiKeyword, or for a patient whose plan expired), true/false = set by the Inbox toggle.
+  // An attendant replying, or the assistant handing off, sets it to false.
+  aiEnabled     Boolean?
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -475,6 +496,8 @@ model Message {
 
   sentByUserId String?
   sentByUser   User?   @relation("SentBy", fields: [sentByUserId], references: [id])
+  // Sent by the AI assistant (shown with its own label in the Inbox).
+  sentByAi     Boolean @default(false)
 
   campaignRecipient CampaignRecipient?
 
@@ -712,6 +735,37 @@ model AiPlan {
   link        String?  // payment / scheduling link the assistant can send
   order       Int      @default(0)
   createdAt   DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// A phrase that switches the assistant on for a conversation (e.g. the pre-filled message of a
+// bio/stories/ad wa.me link), matched case- and accent-insensitively. `origin` is one of
+// ORIGIN_TAGS_PT — the contact gets that Tag when the phrase matches.
+model AiKeyword {
+  id        String   @id @default(cuid())
+  phrase    String
+  origin    String?
+  createdAt DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// A link the AI assistant may send (pre-consulta questionnaire, scheduling, payment...), with
+// the situation it's meant for — the assistant is told never to send a URL that isn't here.
+model AiLink {
+  id        String   @id @default(cuid())
+  title     String
+  url       String
+  whenToUse String   @default("")
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
 
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
