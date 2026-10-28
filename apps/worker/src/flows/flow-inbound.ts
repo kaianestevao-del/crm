@@ -44,6 +44,20 @@ export async function moveRunTo(runId: string, nodeId: string | null, step = 0) 
   await flowStepsQueue.add("step", { runId, token, kind: "continue" }, { removeOnComplete: true, removeOnFail: 200 });
 }
 
+// Feeds the editor's per-block numbers (see FlowEvent). A failure here must never stop the flow.
+export async function recordFlowEvent(
+  run: { id: string; flowId: string; organizationId: string },
+  nodeId: string,
+  kind: "enter" | "button" | "answer" | "noReply",
+  handle?: string,
+) {
+  try {
+    await prisma.flowEvent.create({ data: { flowId: run.flowId, runId: run.id, organizationId: run.organizationId, nodeId, kind, handle } });
+  } catch (err) {
+    console.error("flow_event_failed", { runId: run.id, kind, err });
+  }
+}
+
 export async function hasActiveFlowRun(conversationId: string) {
   const run = await prisma.flowRun.findFirst({ where: { conversationId, status: { in: ACTIVE_RUN_STATUSES } }, select: { id: true } });
   return !!run;
@@ -113,12 +127,14 @@ export async function onInboundMessageForFlows(organizationId: string, conversat
 
     if (item?.kind === "question") {
       await saveAnswer(run, item, answer);
+      await recordFlowEvent(run, run.nodeId, "answer", item.id);
       await moveRunTo(run.id, run.nodeId, run.step + 1);
     } else if (item?.kind === "buttons" && node) {
       const chosen = matchButton(item, answer);
       // Anything that isn't one of the options: keep waiting (the block's "no reply" timer, if
       // any, still runs) — the team sees her message in the Inbox as usual.
       if (!chosen) return true;
+      await recordFlowEvent(run, node.id, "button", chosen.id);
       await moveRunTo(run.id, edgeTarget(graph, node.id, `btn:${chosen.id}`) ?? edgeTarget(graph, node.id, "next"));
     } else {
       // The flow was edited under a waiting run and the item is gone — end it cleanly.

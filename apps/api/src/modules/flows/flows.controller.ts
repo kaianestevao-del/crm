@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { Prisma } from "@crm/db";
-import { FLOW_BUTTON_LABEL_MAX, FLOW_MAX_BUTTONS, FlowGraph, Role } from "@crm/shared";
+import { FLOW_BUTTON_LABEL_MAX, FLOW_MAX_BUTTONS, FlowGraph, FlowStats, Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
 
@@ -157,6 +157,59 @@ export async function getFlowOptions(req: Request, res: Response) {
 export async function getFlow(req: Request, res: Response) {
   assertOwnerOrAdmin(req);
   res.json(await findFlow(req.auth!.organizationId, req.params.id));
+}
+
+// Per-block numbers for the editor. Counts are distinct runs (FlowEvent for reaching a block,
+// tapping a button, answering, no-reply; the block's Messages for delivered/read/failed).
+// Runs from before FlowEvent existed only show up in the totals.
+export async function getFlowStats(req: Request, res: Response) {
+  assertOwnerOrAdmin(req);
+  const flow = await findFlow(req.auth!.organizationId, req.params.id);
+
+  const [runRows, eventRows, messageRows] = await Promise.all([
+    prisma.$queryRaw<{ total: number; contacts: number; done: number; active: number; stopped: number }[]>`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(DISTINCT "contactId")::int AS contacts,
+        (COUNT(*) FILTER (WHERE status = 'DONE'))::int AS done,
+        (COUNT(*) FILTER (WHERE status IN ('RUNNING', 'WAITING')))::int AS active,
+        (COUNT(*) FILTER (WHERE status = 'STOPPED'))::int AS stopped
+      FROM "FlowRun"
+      WHERE "flowId" = ${flow.id}
+    `,
+    prisma.$queryRaw<{ nodeId: string; kind: string; handle: string | null; runs: number }[]>`
+      SELECT "nodeId", kind, handle, COUNT(DISTINCT "runId")::int AS runs
+      FROM "FlowEvent"
+      WHERE "flowId" = ${flow.id}
+      GROUP BY "nodeId", kind, handle
+    `,
+    prisma.$queryRaw<{ nodeId: string; delivered: number; read: number; failed: number }[]>`
+      SELECT
+        m."flowNodeId" AS "nodeId",
+        (COUNT(DISTINCT m."flowRunId") FILTER (WHERE m.status::text IN ('DELIVERED', 'READ')))::int AS delivered,
+        (COUNT(DISTINCT m."flowRunId") FILTER (WHERE m.status::text = 'READ'))::int AS read,
+        (COUNT(DISTINCT m."flowRunId") FILTER (WHERE m.status::text = 'FAILED'))::int AS failed
+      FROM "Message" m
+      JOIN "FlowRun" r ON r.id = m."flowRunId"
+      WHERE r."flowId" = ${flow.id} AND m."flowNodeId" IS NOT NULL
+      GROUP BY m."flowNodeId"
+    `,
+  ]);
+
+  const nodes: FlowStats["nodes"] = {};
+  const nodeStats = (nodeId: string) =>
+    (nodes[nodeId] ??= { entered: 0, delivered: 0, read: 0, failed: 0, answered: 0, noReply: 0, buttons: {} });
+  for (const e of eventRows) {
+    const s = nodeStats(e.nodeId);
+    if (e.kind === "enter") s.entered += e.runs;
+    else if (e.kind === "answer") s.answered += e.runs;
+    else if (e.kind === "noReply") s.noReply += e.runs;
+    else if (e.kind === "button" && e.handle) s.buttons[e.handle] = (s.buttons[e.handle] ?? 0) + e.runs;
+  }
+  for (const m of messageRows) Object.assign(nodeStats(m.nodeId), { delivered: m.delivered, read: m.read, failed: m.failed });
+
+  const stats: FlowStats = { runs: runRows[0] ?? { total: 0, contacts: 0, done: 0, active: 0, stopped: 0 }, nodes };
+  res.json(stats);
 }
 
 export async function createFlow(req: Request, res: Response) {

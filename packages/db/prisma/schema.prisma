@@ -502,11 +502,15 @@ model Message {
   sentByAi     Boolean @default(false)
   // Sent by a Funil automation flow (also labelled in the Inbox).
   sentByFlow   Boolean @default(false)
+  // Which run and block sent it — the flow's per-block delivered/read numbers come from here.
+  flowRunId    String?
+  flowNodeId   String?
 
   campaignRecipient CampaignRecipient?
 
   @@unique([conversationId, waMessageId])
   @@index([conversationId])
+  @@index([flowRunId])
 }
 
 model Pipeline {
@@ -792,6 +796,7 @@ model Flow {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   runs           FlowRun[]
+  events         FlowEvent[]
 
   @@index([organizationId])
 }
@@ -826,4 +831,22 @@ model FlowRun {
 
   @@index([conversationId, status])
   @@index([flowId, status])
+}
+
+// What happened inside a run, for the editor's per-block numbers: "enter" (reached a block),
+// "button" (tapped one — handle is the button id), "answer" (answered a question — handle is the
+// item id) and "noReply" (the block's no-reply timer fired).
+model FlowEvent {
+  id        String   @id @default(cuid())
+  kind      String
+  nodeId    String
+  handle    String?
+  createdAt DateTime @default(now())
+
+  flowId         String
+  flow           Flow   @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  runId          String
+  organizationId String
+
+  @@index([flowId, kind])
 }

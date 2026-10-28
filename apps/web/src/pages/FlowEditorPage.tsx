@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ReactFlow,
@@ -24,6 +24,8 @@ import {
   type FlowGraph,
   type FlowItem,
   type FlowNode,
+  type FlowNodeStats,
+  type FlowStats,
   type FlowWaitUnit,
 } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
@@ -51,12 +53,55 @@ function newId() {
 const inputClass = "w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none";
 const handleClass = "!h-3 !w-3 !border-2 !border-white !bg-gray-500";
 
+// --- Numbers (📊) --------------------------------------------------------------------------
+
+// Set while the editor shows numbers; the blocks read it instead of carrying it in their data
+// (which is what gets saved).
+const FlowStatsContext = createContext<FlowStats | null>(null);
+
+function useNodeStats(nodeId: string): FlowNodeStats | null {
+  const stats = useContext(FlowStatsContext);
+  if (!stats) return null;
+  return stats.nodes[nodeId] ?? { entered: 0, delivered: 0, read: 0, failed: 0, answered: 0, noReply: 0, buttons: {} };
+}
+
+function pct(n: number, of: number) {
+  return of ? `${Math.round((n / of) * 100)}%` : "–";
+}
+
+function StatCell({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div className="flex-1 text-center">
+      <p className="text-sm font-semibold text-gray-900">{value}</p>
+      <p className="text-[10px] text-gray-500">{label}</p>
+      {sub && <p className="text-[10px] text-gray-400">{sub}</p>}
+    </div>
+  );
+}
+
+function StatBadge({ children }: { children: React.ReactNode }) {
+  return <span className="ml-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">{children}</span>;
+}
+
 // --- Blocks as drawn on the canvas ---------------------------------------------------------
 
-function BlockShell({ title, color, selected, children }: { title: string; color: string; selected: boolean; children: React.ReactNode }) {
+function BlockShell({
+  title,
+  color,
+  selected,
+  stats,
+  children,
+}: {
+  title: string;
+  color: string;
+  selected: boolean;
+  stats?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className={`w-64 rounded-2xl border bg-white text-xs shadow-sm ${selected ? "border-brand ring-2 ring-brand/30" : "border-gray-200"}`}>
       <div className={`rounded-t-2xl px-3 py-2 font-semibold ${color}`}>{title}</div>
+      {stats && <div className="flex gap-1 border-b border-sky-100 bg-sky-50/60 px-2 py-1.5">{stats}</div>}
       <div className="space-y-1.5 p-3">{children}</div>
     </div>
   );
@@ -72,8 +117,21 @@ function OutputRow({ label, handleId, tone = "text-gray-500" }: { label: string;
 }
 
 function TriggerBlock({ data, selected }: NodeProps<Node<TriggerData, "trigger">>) {
+  const flowStats = useContext(FlowStatsContext);
   return (
-    <BlockShell title="⚡ Quando a mensagem contém…" color="bg-amber-50 text-amber-800" selected={!!selected}>
+    <BlockShell
+      title="⚡ Quando a mensagem contém…"
+      color="bg-amber-50 text-amber-800"
+      selected={!!selected}
+      stats={
+        flowStats && (
+          <>
+            <StatCell label="Disparos" value={flowStats.runs.total} />
+            <StatCell label="Contatos únicos" value={flowStats.runs.contacts} />
+          </>
+        )
+      }
+    >
       {data.keywords.some((k) => k.trim()) ? (
         data.keywords.filter((k) => k.trim()).map((k) => (
           <p key={k} className="rounded-lg bg-gray-50 px-2 py-1 text-gray-700">
@@ -105,10 +163,28 @@ function itemPreview(item: FlowItem) {
   }
 }
 
-function MessageBlock({ data, selected }: NodeProps<Node<MessageData, "message">>) {
+function MessageBlock({ id, data, selected }: NodeProps<Node<MessageData, "message">>) {
   const waits = data.items.some((i) => i.kind === "question" || i.kind === "buttons");
+  const stats = useNodeStats(id);
+  const sends = data.items.some((i) => i.kind !== "wait");
   return (
-    <BlockShell title={`💬 ${data.title || "Enviar mensagem"}`} color="bg-green-50 text-green-800" selected={!!selected}>
+    <BlockShell
+      title={`💬 ${data.title || "Enviar mensagem"}`}
+      color="bg-green-50 text-green-800"
+      selected={!!selected}
+      stats={
+        stats &&
+        (sends ? (
+          <>
+            <StatCell label="Chegaram" value={stats.entered} />
+            <StatCell label="Entregue" value={pct(stats.delivered, stats.entered)} sub={stats.failed ? `${stats.failed} falharam` : undefined} />
+            <StatCell label="Lido" value={pct(stats.read, stats.entered)} />
+          </>
+        ) : (
+          <StatCell label="Chegaram" value={stats.entered} />
+        ))
+      }
+    >
       <Handle type="target" position={Position.Left} className={handleClass} style={{ left: -6 }} />
       {data.items.length === 0 && <p className="text-gray-400">Clique para adicionar mensagens</p>}
       {data.items.map((item) => (
@@ -118,10 +194,20 @@ function MessageBlock({ data, selected }: NodeProps<Node<MessageData, "message">
           >
             {itemPreview(item)}
           </p>
+          {item.kind === "question" && stats && (
+            <p className="mt-0.5 text-right text-[10px] text-sky-800">
+              {stats.answered} responderam ({pct(stats.answered, stats.entered)})
+            </p>
+          )}
           {item.kind === "buttons" &&
             item.buttons.map((b) => (
               <div key={b.id} className="relative mt-1 rounded-lg border border-gray-200 px-2 py-1 text-center font-medium text-gray-800">
                 {b.label}
+                {stats && (
+                  <StatBadge>
+                    {stats.buttons[b.id] ?? 0} · {pct(stats.buttons[b.id] ?? 0, stats.entered)}
+                  </StatBadge>
+                )}
                 <Handle type="source" position={Position.Right} id={`btn:${b.id}`} className={handleClass} style={{ right: -18 }} />
               </div>
             ))}
@@ -129,7 +215,7 @@ function MessageBlock({ data, selected }: NodeProps<Node<MessageData, "message">
       ))}
       {waits && data.noReplyAfter && (
         <OutputRow
-          label={`Sem resposta em ${data.noReplyAfter.amount} ${UNIT_LABELS[data.noReplyAfter.unit]}`}
+          label={`Sem resposta em ${data.noReplyAfter.amount} ${UNIT_LABELS[data.noReplyAfter.unit]}${stats ? ` · ${stats.noReply}` : ""}`}
           handleId="noReply"
           tone="text-red-500"
         />
@@ -534,6 +620,11 @@ function ActionPanel({
   );
 }
 
+function ActionStats({ nodeId }: { nodeId: string }) {
+  const stats = useNodeStats(nodeId);
+  return stats ? <StatCell label="Passaram" value={stats.entered} /> : null;
+}
+
 // --- Page ----------------------------------------------------------------------------------
 
 function toEditor(graph: FlowGraph): { nodes: EditorNode[]; edges: Edge[] } {
@@ -578,6 +669,24 @@ export function FlowEditorPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [showStats, setShowStats] = useState(false);
+  const [stats, setStats] = useState<FlowStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
+  async function loadStats() {
+    setLoadingStats(true);
+    try {
+      const res = await api.get<FlowStats>(`/flows/${id}/stats`);
+      setStats(res.data);
+    } finally {
+      setLoadingStats(false);
+    }
+  }
+
+  function toggleStats() {
+    if (!showStats) loadStats();
+    setShowStats(!showStats);
+  }
 
   useEffect(() => {
     Promise.all([api.get(`/flows/${id}`), api.get("/flows/options")]).then(([flow, options]) => {
@@ -597,7 +706,12 @@ export function FlowEditorPage() {
       trigger: TriggerBlock,
       message: MessageBlock,
       action: (props: NodeProps<Node<ActionData, "action">>) => (
-        <BlockShell title={`⚙️ ${props.data.title || "Ações"}`} color="bg-yellow-50 text-yellow-800" selected={!!props.selected}>
+        <BlockShell
+          title={`⚙️ ${props.data.title || "Ações"}`}
+          color="bg-yellow-50 text-yellow-800"
+          selected={!!props.selected}
+          stats={<ActionStats nodeId={props.id} />}
+        >
           <Handle type="target" position={Position.Left} className={handleClass} style={{ left: -6 }} />
           {props.data.actions.length === 0 && <p className="text-gray-400">Clique para adicionar ações</p>}
           {props.data.actions.map((a, i) => (
@@ -690,6 +804,12 @@ export function FlowEditorPage() {
         <button onClick={() => addBlock("action")} className="rounded-xl border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">
           + Ações
         </button>
+        <button
+          onClick={toggleStats}
+          className={`rounded-xl border px-3 py-1.5 text-sm ${showStats ? "border-sky-300 bg-sky-50 text-sky-800" : "border-gray-300 hover:bg-gray-50"}`}
+        >
+          📊 Números
+        </button>
         <div className="flex-1" />
         {message && <span className={`text-xs ${message.ok ? "text-green-700" : "text-red-600"}`}>{message.text}</span>}
         {dirty && !message && <span className="text-xs text-gray-400">Alterações não salvas</span>}
@@ -709,24 +829,57 @@ export function FlowEditorPage() {
         </button>
       </div>
 
+      {showStats && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-sky-100 bg-sky-50 px-4 py-2 text-xs text-sky-900">
+          {stats ? (
+            <>
+              <span>
+                <b>{stats.runs.total}</b> disparos
+              </span>
+              <span>
+                <b>{stats.runs.contacts}</b> contatos únicos
+              </span>
+              <span>
+                <b>{stats.runs.done}</b> concluíram ({pct(stats.runs.done, stats.runs.total)})
+              </span>
+              <span>
+                <b>{stats.runs.active}</b> em andamento
+              </span>
+              <span title="Alguém da equipe respondeu no meio do fluxo, ou uma mensagem não pôde ser enviada.">
+                <b>{stats.runs.stopped}</b> interrompidos
+              </span>
+            </>
+          ) : (
+            <span>Carregando números...</span>
+          )}
+          <div className="flex-1" />
+          <span className="text-sky-700/70">Porcentagens sobre quem chegou em cada bloco.</span>
+          <button onClick={loadStats} disabled={loadingStats} className="font-medium text-sky-800 hover:underline disabled:opacity-50">
+            {loadingStats ? "Atualizando..." : "Atualizar"}
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={(_, n) => setSelectedId(n.id)}
-            onPaneClick={() => setSelectedId(null)}
-            defaultEdgeOptions={{ style: { strokeWidth: 2 } }}
-            fitView
-            fitViewOptions={{ maxZoom: 1 }}
-          >
-            <Background />
-            <Controls />
-          </ReactFlow>
+          <FlowStatsContext.Provider value={showStats ? stats : null}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onNodeClick={(_, n) => setSelectedId(n.id)}
+              onPaneClick={() => setSelectedId(null)}
+              defaultEdgeOptions={{ style: { strokeWidth: 2 } }}
+              fitView
+              fitViewOptions={{ maxZoom: 1 }}
+            >
+              <Background />
+              <Controls />
+            </ReactFlow>
+          </FlowStatsContext.Provider>
         </div>
 
         {selected && (

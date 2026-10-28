@@ -5,7 +5,7 @@ import { createRedisClient } from "../redis";
 import { publishRealtimeEvent } from "../pubsub";
 import { env } from "../env";
 import { interactiveAsText, sendOutboundMessage } from "../baileys/session-manager";
-import { edgeTarget, findNode, flowGraph, flowStepsQueue, moveRunTo, newToken } from "./flow-inbound";
+import { edgeTarget, findNode, flowGraph, flowStepsQueue, moveRunTo, newToken, recordFlowEvent } from "./flow-inbound";
 
 const prisma = getPrismaClient();
 
@@ -37,7 +37,7 @@ async function stillOwned(run: RunWithContext, token: string) {
   return fresh?.status === FlowRunStatus.RUNNING && fresh.token === token;
 }
 
-async function send(run: RunWithContext, item: Exclude<FlowItem, { kind: "wait" }>) {
+async function send(run: RunWithContext, nodeId: string, item: Exclude<FlowItem, { kind: "wait" }>) {
   const { conversation } = run;
   const contact = conversation.contact;
   const job: Omit<OutboundMessageJob, "messageId"> = {
@@ -78,6 +78,8 @@ async function send(run: RunWithContext, item: Exclude<FlowItem, { kind: "wait" 
       mediaUrl,
       status: MessageStatus.PENDING,
       sentByFlow: true,
+      flowRunId: run.id,
+      flowNodeId: nodeId,
     },
   });
   await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
@@ -187,6 +189,8 @@ async function advance(run: RunWithContext, token: string) {
       await finish(run.id, FlowRunStatus.DONE);
       return;
     }
+    // Step 0 is arriving at the block; a later step is resuming inside it (after a wait or answer).
+    if (step === 0) await recordFlowEvent(run, node.id, "enter");
 
     if (node.type === "action") {
       if (await runActions(run, node.data.actions)) return;
@@ -220,7 +224,7 @@ async function advance(run: RunWithContext, token: string) {
             where: { id: run.id },
             data: { status: FlowRunStatus.WAITING, nodeId: node.id, step: i, token: next },
           });
-          await send(run, item);
+          await send(run, node.id, item);
           const noReply = node.data.noReplyAfter;
           if (noReply && noReply.amount > 0 && edgeTarget(graph, node.id, "noReply")) {
             await flowStepsQueue.add(
@@ -232,7 +236,7 @@ async function advance(run: RunWithContext, token: string) {
           return;
         }
 
-        await send(run, item);
+        await send(run, node.id, item);
         await prisma.flowRun.update({ where: { id: run.id }, data: { nodeId: node.id, step: i + 1 } });
       }
     }
@@ -253,6 +257,7 @@ async function processFlowStep(job: FlowStepJob) {
   if (job.kind === "noReply") {
     // She never answered the block this timer belongs to — follow its "sem resposta" arrow.
     if (run.status !== FlowRunStatus.WAITING) return;
+    await recordFlowEvent(run, run.nodeId, "noReply");
     await moveRunTo(run.id, edgeTarget(flowGraph(run.flow.graph), run.nodeId, "noReply"));
     return;
   }

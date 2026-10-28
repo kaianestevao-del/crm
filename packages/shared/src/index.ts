@@ -220,7 +220,25 @@ export interface FlowGraph {
   edges: FlowEdge[];
 }
 
-export const FLOW_WAIT_UNIT_MS: Record<FlowWaitUnit, number> = {
+// The editor's numbers (GET /flows/:id/stats). Every count is of runs (one per time a contact
+// went through the flow), so a block's percentages compare against how many runs reached it.
+export interface FlowNodeStats {
+  entered: number;
+  delivered: number;
+  read: number;
+  failed: number;
+  answered: number;
+  noReply: number;
+  // Button id → runs that tapped it.
+  buttons: Record<string, number>;
+}
+
+export interface FlowStats {
+  runs: { total: number; contacts: number; done: number; active: number; stopped: number };
+  nodes: Record<string, FlowNodeStats>;
+}
+
+export const FLOW_WAIT_UNIT_MS:Record<FlowWaitUnit, number> = {
   seconds: 1000,
   minutes: 60 * 1000,
   hours: 60 * 60 * 1000,
