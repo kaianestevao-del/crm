@@ -120,6 +120,14 @@ model Organization {
   templatePriceMarketing Decimal @default(0.35)
   templatePriceUtility   Decimal @default(0.04)
 
+  // Assistente de IA (aba "Inteligência Artificial"). Bring-your-own-key like groqApiKey —
+  // null disables the assistant. aiPrompt is the org's own instructions (tone, what it may
+  // say, when to hand off); the fixed safety rules and the AiPlan list are added around it
+  // when the system prompt is built (see ai-assistant/ai-prompt.ts).
+  anthropicApiKey String?
+  aiPrompt        String  @default("")
+
+  aiPlans          AiPlan[]
   memberships      Membership[]
   whatsappSessions WhatsappSession[]
   contacts         Contact[]
@@ -693,3 +701,20 @@ model CampaignRecipient {
   @@index([campaignId])
 }
 
+// A plan/price the AI assistant is allowed to quote — kept separate from the free-text prompt so
+// a price change is one field edit, and so the assistant can be told to never quote anything
+// that isn't on this list.
+model AiPlan {
+  id          String   @id @default(cuid())
+  name        String
+  price       Decimal
+  description String   @default("")
+  link        String?  // payment / scheduling link the assistant can send
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}

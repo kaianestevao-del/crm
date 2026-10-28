@@ -20,7 +20,8 @@ export type IconName =
   | "edit"
   | "plus"
   | "link"
-  | "megaphone";
+  | "megaphone"
+  | "sparkles";
 
 const paths: Record<IconName, JSX.Element> = {
   grid: (
@@ -159,6 +160,12 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M3 11v3a1 1 0 0 0 1 1h2l3.5 5V5L6 10H4a1 1 0 0 0-1 1Z" />
       <path d="M13 7.5a5 5 0 0 1 0 9" />
       <path d="M16.5 5a9 9 0 0 1 0 14" />
+    </>
+  ),
+  sparkles: (
+    <>
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" />
+      <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" />
     </>
   ),
 };

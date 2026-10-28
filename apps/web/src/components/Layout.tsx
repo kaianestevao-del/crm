@@ -19,6 +19,7 @@ const navItems: { to: string; label: string; icon: IconName; module?: ModuleKey;
   { to: "/links", label: "Links & Contatos", icon: "link" },
   { to: "/campanhas", label: "Campanhas", icon: "megaphone", ownerOrAdminOnly: true },
   { to: "/templates", label: "Templates", icon: "tag", ownerOrAdminOnly: true },
+  { to: "/ia", label: "Inteligência Artificial", icon: "sparkles", ownerOrAdminOnly: true },
 ];
 
 export function Layout() {

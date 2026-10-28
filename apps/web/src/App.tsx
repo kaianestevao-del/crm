@@ -16,6 +16,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { LinksPage } from "./pages/LinksPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
 import { CampaignsPage } from "./pages/CampaignsPage";
+import { AiAssistantPage } from "./pages/AiAssistantPage";
 
 export function App() {
   return (
@@ -46,6 +47,7 @@ export function App() {
               <Route path="/configuracoes" element={<SettingsPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/campanhas" element={<CampaignsPage />} />
+              <Route path="/ia" element={<AiAssistantPage />} />
             </Route>
             <Route path="/links" element={<LinksPage />} />
           </Route>
