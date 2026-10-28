@@ -735,15 +735,45 @@ async function sendCloudApiMessage(
     payload = { type: "text", text: { body: job.text ?? "" } };
   }
 
-  const res = await fetch(`${CLOUD_API_BASE}/${session.cloudApiPhoneNumberId}/messages`, {
+  const body = { messaging_product: "whatsapp", to, ...payload };
+  const endpoint = job.templateCategory === "MARKETING" ? "marketing_messages" : "messages";
+  let result = await postCloudApiMessage(session, endpoint, body);
+
+  // 131063 = marketing is switched off on Cloud API for this account, i.e. Meta now treats this
+  // template as MARKETING although we still had it as UTILITY (re-classified after the sync at
+  // dispatch). The first attempt was rejected outright, so resending once through the Marketing
+  // Messages API can't double-deliver — and recording the new category makes the next campaign
+  // route it right from the start.
+  if (!result.ok && endpoint === "messages" && job.templateName && result.data.error?.code === 131063) {
+    result = await postCloudApiMessage(session, "marketing_messages", body);
+    if (result.ok) {
+      await prisma.messageTemplate
+        .updateMany({
+          where: { whatsappSessionId: job.sessionId, name: job.templateName, language: job.templateLanguage || "pt_BR" },
+          data: { category: "MARKETING" },
+        })
+        .catch((err) => console.error("record_template_recategorized_failed", err));
+    }
+  }
+  if (!result.ok) throw new Error(`cloud_api_send_failed:${JSON.stringify(result.data)}`);
+
+  return result.data.messages?.[0]?.id;
+}
+
+// Same payload on both endpoints — /marketing_messages (Marketing Messages API) only accepts
+// MARKETING templates, /messages (Cloud API) takes everything else.
+async function postCloudApiMessage(
+  session: { cloudApiPhoneNumberId: string; cloudApiAccessToken: string },
+  endpoint: "messages" | "marketing_messages",
+  body: Record<string, unknown>,
+) {
+  const res = await fetch(`${CLOUD_API_BASE}/${session.cloudApiPhoneNumberId}/${endpoint}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${session.cloudApiAccessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messaging_product: "whatsapp", to, ...payload }),
+    body: JSON.stringify(body),
   });
-  const data = (await res.json()) as { messages?: { id: string }[] };
-  if (!res.ok) throw new Error(`cloud_api_send_failed:${JSON.stringify(data)}`);
-
-  return data.messages?.[0]?.id;
+  const data = (await res.json()) as { messages?: { id: string }[]; error?: { code?: number } };
+  return { ok: res.ok, data };
 }
 
 // Deliberately two separate try/catches: only a failure in the network call above means the

@@ -1,5 +1,5 @@
 import { Queue, Worker } from "bullmq";
-import { getPrismaClient, MessageDirection, MessageStatus, MessageType } from "@crm/db";
+import { getPrismaClient, MessageDirection, MessageStatus, MessageType, TemplateCategory } from "@crm/db";
 import {
   QUEUE_CAMPAIGN_DISPATCH,
   QUEUE_OUTBOUND_MESSAGES,
@@ -19,6 +19,37 @@ const outboundMessagesQueue = new Queue<OutboundMessageJob>(QUEUE_OUTBOUND_MESSA
   connection: createRedisClient(),
 });
 
+const CLOUD_API_BASE = "https://graph.facebook.com/v21.0";
+
+// Meta re-classifies UTILITY templates as MARKETING after approval when the copy reads as
+// promotional, and the category decides which endpoint each send goes through (see
+// sendCloudApiMessage). The Templates/Campaigns pages sync it on open, but a scheduled campaign
+// can fire days later — so check once more right before dispatching. Any failure here keeps the
+// stored category; a stale UTILITY is still caught by the 131063 retry on the send itself.
+async function refreshTemplateCategory(
+  template: { id: string; metaTemplateId: string | null; category: TemplateCategory },
+  whatsappSessionId: string,
+): Promise<TemplateCategory> {
+  if (!template.metaTemplateId) return template.category;
+  try {
+    const session = await prisma.whatsappSession.findUnique({ where: { id: whatsappSessionId } });
+    if (!session?.cloudApiAccessToken) return template.category;
+    const res = await fetch(`${CLOUD_API_BASE}/${template.metaTemplateId}?fields=category`, {
+      headers: { Authorization: `Bearer ${session.cloudApiAccessToken}` },
+    });
+    const data = (await res.json()) as { category?: string };
+    const metaCategory = Object.values(TemplateCategory).find((c) => c === data.category);
+    if (!res.ok || !metaCategory) return template.category;
+    if (metaCategory !== template.category) {
+      await prisma.messageTemplate.update({ where: { id: template.id }, data: { category: metaCategory } });
+    }
+    return metaCategory;
+  } catch (err) {
+    console.error("refresh_template_category_failed", err);
+    return template.category;
+  }
+}
+
 // The whole per-recipient dispatch loop the API used to run inline (blocking the HTTP
 // response) now lives here instead, reached via a delayed BullMQ job (jobId = campaign id).
 // An immediate "send now" just uses delay: 0 — same code path as a scheduled send, the only
@@ -32,6 +63,8 @@ async function dispatchCampaign(campaignId: string) {
   if (campaign.status === "SCHEDULED") {
     await prisma.campaign.update({ where: { id: campaign.id }, data: { status: "SENDING", startedAt: new Date() } });
   }
+
+  const templateCategory = await refreshTemplateCategory(campaign.template, campaign.whatsappSessionId);
 
   const recipients = await prisma.campaignRecipient.findMany({
     where: { campaignId: campaign.id, status: "PENDING" },
@@ -75,6 +108,7 @@ async function dispatchCampaign(campaignId: string) {
       templateName: campaign.template.name,
       templateLanguage: campaign.template.language,
       templateParams,
+      templateCategory,
       campaignRecipientId: recipient.id,
     });
   }

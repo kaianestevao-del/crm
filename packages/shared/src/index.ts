@@ -175,6 +175,10 @@ export interface OutboundMessageJob {
   templateName?: string;
   templateLanguage?: string;
   templateParams?: string[];
+  // Picks the Meta endpoint: MARKETING templates go through the Marketing Messages API
+  // (/marketing_messages), since Cloud API stops delivering marketing on Oct 13, 2027; every
+  // other template (and every non-template message) stays on Cloud API's /messages.
+  templateCategory?: "MARKETING" | "UTILITY";
   // Present only for campaign sends — the worker updates this CampaignRecipient's status
   // (SENT/FAILED) after attempting the send, alongside the regular Message it always creates.
   campaignRecipientId?: string;

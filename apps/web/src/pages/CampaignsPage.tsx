@@ -102,6 +102,8 @@ function describeFailure(raw: string): string {
       return "A Meta limitou mensagens de marketing para este contato (engajamento baixo).";
     case "131047":
       return "Fora da janela de 24h.";
+    case "131063":
+      return "A Meta passou a tratar este template como Marketing e o envio pela Marketing Messages API também falhou — confira se os termos da MM API foram aceitos.";
     case "190":
       return "Token de acesso da Meta expirado — atualize em Conexão WhatsApp.";
     case "131056":
