@@ -42,8 +42,6 @@ const MAX_TYPING_WAITS = 12;
 const MAX_REPLIES_PER_DAY = 25;
 // - a reply longer than this is not sent (hand off instead) — real replies are a few lines;
 const MAX_REPLY_CHARS = 1200;
-// - an expired patient's conversation only switches itself on if no attendant wrote in this window.
-const ATTENDANT_QUIET_MS = 12 * 60 * 60 * 1000;
 // How much of the conversation the assistant reads.
 const HISTORY_LIMIT = 40;
 
@@ -147,7 +145,9 @@ async function processAiReply(job: AiReplyJob) {
 
   const org = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
   if (!org.aiEnabled || !org.anthropicApiKey) return;
-  if (conversation.aiEnabled === false) return;
+  // Only a conversation switched on by an activation keyword or the Inbox toggle — whatever the
+  // contact's funnel stage (active or expired patient included), nothing else turns it on.
+  if (conversation.aiEnabled !== true) return;
   // A Funil flow started after this reply was scheduled — the flow has the conversation now.
   if (await hasActiveFlowRun(conversationId)) return;
 
@@ -156,25 +156,7 @@ async function processAiReply(job: AiReplyJob) {
     orderBy: { createdAt: "desc" },
     include: { stage: true },
   });
-  // An active patient is the team's — the assistant never talks to her.
-  if (deal?.stage.role === "ACTIVE_PATIENT") return;
   const expiredPatient = deal?.stage.role === "LOST_PATIENT";
-
-  if (conversation.aiEnabled === null) {
-    // Not switched on by a keyword or the toggle. The one automatic case: an expired patient
-    // writing back (renewal), and only if nobody from the team has been talking to her lately.
-    if (!expiredPatient) return;
-    const recentAttendant = await prisma.message.findFirst({
-      where: {
-        conversationId,
-        direction: MessageDirection.OUTBOUND,
-        sentByAi: false,
-        createdAt: { gte: new Date(Date.now() - ATTENDANT_QUIET_MS) },
-      },
-    });
-    if (recentAttendant) return;
-    await prisma.conversation.update({ where: { id: conversationId }, data: { aiEnabled: true } });
-  }
 
   const repliesToday = await prisma.message.count({
     where: { conversationId, sentByAi: true, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },

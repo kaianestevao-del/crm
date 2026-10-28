@@ -397,8 +397,8 @@ model Conversation {
   unreadCount   Int                @default(0)
   status        ConversationStatus @default(OPEN)
   createdAt     DateTime           @default(now())
-  // AI assistant for this conversation: null = automatic (it switches on when a message matches
-  // an AiKeyword, or for a patient whose plan expired), true/false = set by the Inbox toggle.
+  // AI assistant for this conversation: null = automatic (it switches on only when a message
+  // matches an AiKeyword), true/false = set by the Inbox toggle.
   // An attendant replying, or the assistant handing off, sets it to false.
   aiEnabled     Boolean?
 

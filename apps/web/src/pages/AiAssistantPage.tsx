@@ -136,9 +136,10 @@ function StatusCard({ settings, onChange }: { settings: AiSettings; onChange: (s
         <div>
           <p className="text-sm font-medium">{settings.enabled ? "🟢 IA ligada — respondendo o WhatsApp" : "⚪ IA desligada"}</p>
           <p className="mt-0.5 text-xs text-gray-600">
-            Ligada, a IA responde só as conversas que começarem com uma palavra-chave (ou ligadas pelo botão na conversa) e
-            as pacientes vencidas que escreverem. Ela espera 1 minuto depois da última mensagem, para quando alguém da equipe
-            responder, nunca fala com Paciente Ativa e transfere para a equipe quando não souber.
+            Ligada, a IA responde só as conversas que começarem com uma palavra-chave ou que você ligar pelo botão na
+            conversa — em qualquer etapa do Kanban, inclusive Paciente Ativa ou vencida. Ela nunca inicia uma conversa, espera
+            1 minuto depois da última mensagem, para quando alguém da equipe responder e transfere para a equipe quando não
+            souber.
           </p>
         </div>
         <Toggle on={settings.enabled} onClick={toggle} disabled={saving} />

@@ -922,7 +922,7 @@ export function InboxPage() {
                     onClick={() => toggleConversationAi(selectedConversation)}
                     title={
                       selectedConversation.aiEnabled === null
-                        ? "Automático: a IA assume se a paciente mandar uma palavra-chave (ou for paciente vencida). Clique para ligar agora."
+                        ? "Automático: a IA só assume se a paciente mandar uma palavra-chave. Clique para ligar agora."
                         : selectedConversation.aiEnabled
                           ? "A IA está respondendo esta conversa. Clique para desligar."
                           : "A IA não responde esta conversa. Clique para ligar."
