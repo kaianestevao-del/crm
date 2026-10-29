@@ -13,6 +13,9 @@ interface Template {
   language: string;
   bodyText: string;
   bodyExamples: string[];
+  buttonText: string | null;
+  buttonUrl: string | null;
+  quickReplies: string[];
   variableCount: number;
   status: TemplateStatus;
   rejectionReason: string | null;
@@ -46,6 +49,42 @@ interface TemplateFormInitial {
   category: TemplateCategory;
   bodyText: string;
   bodyExamples: string[];
+  buttonText: string | null;
+  buttonUrl: string | null;
+  quickReplies: string[];
+}
+
+interface FlowSummary {
+  id: string;
+  name: string;
+  active: boolean;
+  triggerKeywords: string[];
+}
+
+const QUICK_REPLY_MAX = 3;
+
+// Same matching the worker uses to start a Funil (accents/case ignored, keyword contained in the
+// text) — a tapped quick reply arrives as its label, so this tells which flow it will start.
+function normalizeKeyword(text: string) {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function flowForLabel(label: string, flows: FlowSummary[]) {
+  const text = normalizeKeyword(label);
+  if (!text) return null;
+  return flows.find((f) => f.active && f.triggerKeywords.some((k) => normalizeKeyword(k) && text.includes(normalizeKeyword(k)))) ?? null;
+}
+
+// Meta limits a URL button label to 25 characters and only accepts http(s) links.
+const BUTTON_TEXT_MAX = 25;
+
+function isValidButtonUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 function TemplateForm({
@@ -63,6 +102,11 @@ function TemplateForm({
   const [category, setCategory] = useState<TemplateCategory>(initial?.category ?? "UTILITY");
   const [bodyText, setBodyText] = useState(initial?.bodyText ?? "");
   const [examples, setExamples] = useState<string[]>(initial?.bodyExamples ?? []);
+  const [hasButton, setHasButton] = useState(Boolean(initial?.buttonText));
+  const [buttonText, setButtonText] = useState(initial?.buttonText ?? "");
+  const [buttonUrl, setButtonUrl] = useState(initial?.buttonUrl ?? "");
+  const [quickReplies, setQuickReplies] = useState<string[]>(initial?.quickReplies ?? []);
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [textarea, setTextarea] = useState<HTMLTextAreaElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +115,18 @@ function TemplateForm({
   // A contact tag like {{nome}} in an example is the most common mix-up — it's only resolved in
   // the Campaign, and Meta's reviewer would just see the literal braces.
   const exampleHasTag = examples.slice(0, variableCount).some((v) => /\{\{.*\}\}/.test(v));
+  const buttonUrlInvalid = hasButton && buttonUrl.trim() !== "" && !isValidButtonUrl(buttonUrl.trim());
+  const buttonIncomplete = hasButton && (!buttonText.trim() || !buttonUrl.trim() || buttonUrlInvalid);
+  const quickRepliesIncomplete = quickReplies.some((q) => !q.trim());
+  const buttonLabels = [...quickReplies, ...(hasButton ? [buttonText] : [])].map((l) => l.trim().toLowerCase()).filter(Boolean);
+  const duplicateButtons = new Set(buttonLabels).size !== buttonLabels.length;
+
+  useEffect(() => {
+    api
+      .get("/flows")
+      .then((res) => setFlows(res.data.items ?? []))
+      .catch(() => {});
+  }, []);
 
   function updateExample(index: number, value: string) {
     setExamples((prev) => {
@@ -85,10 +141,19 @@ function TemplateForm({
     e.preventDefault();
     const trimmedExamples = examples.slice(0, variableCount).map((v) => v.trim());
     if (!name.trim() || !bodyText.trim() || trimmedExamples.some((v) => !v) || trimmedExamples.length !== variableCount) return;
+    if (buttonIncomplete || quickRepliesIncomplete || duplicateButtons) return;
     setSaving(true);
     setError(null);
     try {
-      const payload = { name: name.trim(), category, bodyText: bodyText.trim(), bodyExamples: trimmedExamples };
+      const payload = {
+        name: name.trim(),
+        category,
+        bodyText: bodyText.trim(),
+        bodyExamples: trimmedExamples,
+        buttonText: hasButton ? buttonText.trim() : null,
+        buttonUrl: hasButton ? buttonUrl.trim() : null,
+        quickReplies: quickReplies.map((q) => q.trim()),
+      };
       if (editingId) {
         await api.patch(`/templates/${editingId}`, payload);
       } else {
@@ -102,7 +167,11 @@ function TemplateForm({
           ? "O nome só pode ter letras minúsculas, números e underline (_)."
           : message === "body_examples_count_mismatch"
             ? "Preencha um valor de exemplo para cada variável."
-            : `Não foi possível ${editingId ? "salvar" : "criar"} o template.`,
+            : message === "button_text_and_url_required"
+              ? "Preencha o texto e o link do botão."
+              : message === "duplicate_button_text"
+                ? "Dois botões não podem ter o mesmo texto."
+                : `Não foi possível ${editingId ? "salvar" : "criar"} o template.`,
       );
     } finally {
       setSaving(false);
@@ -222,6 +291,97 @@ function TemplateForm({
         </div>
       )}
 
+      <div className="rounded-xl border border-gray-200 p-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-gray-700">Botões de resposta (opcional)</p>
+          {quickReplies.length < QUICK_REPLY_MAX && (
+            <button
+              type="button"
+              onClick={() => setQuickReplies((prev) => [...prev, ""])}
+              className="text-xs font-medium text-brand-dark hover:underline"
+            >
+              + botão de resposta
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-gray-400">
+          Ex: "Quero participar" / "Agora não". Quando a pessoa toca, chega como se ela tivesse escrito esse texto — se ele
+          contiver a palavra-chave de um Funil ativo, o Funil começa sozinho.
+        </p>
+        {quickReplies.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {quickReplies.map((label, i) => {
+              const flow = flowForLabel(label, flows);
+              return (
+                <div key={i}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={label}
+                      maxLength={BUTTON_TEXT_MAX}
+                      onChange={(e) => setQuickReplies((prev) => prev.map((q, j) => (j === i ? e.target.value : q)))}
+                      placeholder={i === 0 ? "ex: Quero participar" : "ex: Agora não"}
+                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    />
+                    <span className="w-10 shrink-0 text-right text-xs text-gray-400">
+                      {label.length}/{BUTTON_TEXT_MAX}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQuickReplies((prev) => prev.filter((_, j) => j !== i))}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                  {label.trim() && (
+                    <p className={`mt-1 text-xs ${flow ? "text-green-700" : "text-gray-400"}`}>
+                      {flow ? `Ao tocar, inicia o Funil "${flow.name}"` : "Nenhum Funil ativo com essa palavra-chave — a resposta só cai na Inbox."}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-gray-200 p-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={hasButton} onChange={(e) => setHasButton(e.target.checked)} />
+          Adicionar botão com link no final da mensagem
+        </label>
+        <p className="mt-1 text-xs text-gray-400">
+          A pessoa recebe a mensagem com um botão embaixo — ao tocar, abre o link. O link é fixo: vai igual pra todo mundo.
+        </p>
+        {hasButton && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Texto do botão ({buttonText.length}/{BUTTON_TEXT_MAX})
+              </label>
+              <input
+                value={buttonText}
+                maxLength={BUTTON_TEXT_MAX}
+                onChange={(e) => setButtonText(e.target.value)}
+                placeholder="ex: Responder questionário"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">Link</label>
+              <input
+                value={buttonUrl}
+                onChange={(e) => setButtonUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              />
+              {buttonUrlInvalid && <p className="mt-1 text-xs text-red-600">O link precisa começar com https://</p>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {duplicateButtons && <p className="text-xs text-red-600">Dois botões não podem ter o mesmo texto.</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <div className="flex justify-end gap-2">
@@ -234,7 +394,10 @@ function TemplateForm({
             saving ||
             !name.trim() ||
             !bodyText.trim() ||
-            Array.from({ length: variableCount }).some((_, i) => !examples[i]?.trim())
+            Array.from({ length: variableCount }).some((_, i) => !examples[i]?.trim()) ||
+            buttonIncomplete ||
+            quickRepliesIncomplete ||
+            duplicateButtons
           }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
@@ -363,6 +526,9 @@ export function TemplatesPage() {
                   category: formMode.template.category,
                   bodyText: formMode.template.bodyText,
                   bodyExamples: formMode.template.bodyExamples,
+                  buttonText: formMode.template.buttonText,
+                  buttonUrl: formMode.template.buttonUrl,
+                  quickReplies: formMode.template.quickReplies,
                 }
               : formMode.type === "duplicate"
                 ? {
@@ -370,6 +536,9 @@ export function TemplatesPage() {
                     category: formMode.template.category,
                     bodyText: formMode.template.bodyText,
                     bodyExamples: formMode.template.bodyExamples,
+                    buttonText: formMode.template.buttonText,
+                    buttonUrl: formMode.template.buttonUrl,
+                    quickReplies: formMode.template.quickReplies,
                   }
                 : undefined
           }
@@ -443,6 +612,21 @@ export function TemplatesPage() {
               </div>
             </div>
             <p className="whitespace-pre-wrap text-sm text-gray-600">{t.bodyText}</p>
+            {t.quickReplies.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {t.quickReplies.map((q) => (
+                  <span key={q} className="rounded-lg border border-gray-300 px-2 py-0.5 text-xs font-medium text-brand-dark">
+                    {q}
+                  </span>
+                ))}
+              </div>
+            )}
+            {t.buttonText && t.buttonUrl && (
+              <p className="mt-2 text-xs text-gray-500">
+                Botão: <span className="rounded-lg border border-gray-300 px-2 py-0.5 font-medium text-brand-dark">{t.buttonText}</span>{" "}
+                → <span className="break-all">{t.buttonUrl}</span>
+              </p>
+            )}
             {t.status === "REJECTED" && t.rejectionReason && (
               <p className="mt-1 text-xs text-red-600">Motivo da rejeição: {t.rejectionReason}</p>
             )}

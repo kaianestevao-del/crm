@@ -43,7 +43,30 @@ const createSchema = z.object({
   language: z.string().min(1).default("pt_BR"),
   bodyText: z.string().min(1),
   bodyExamples: z.array(z.string().min(1)).optional().default([]),
+  // Meta caps URL button labels at 25 characters and only accepts http(s) links.
+  buttonText: z.string().trim().max(25, "button_text_too_long").nullish(),
+  buttonUrl: z
+    .string()
+    .trim()
+    .url("button_url_invalid")
+    .regex(/^https?:\/\//i, "button_url_invalid")
+    .nullish(),
+  quickReplies: z
+    .array(z.string().trim().min(1).max(25, "quick_reply_too_long"))
+    .max(3, "too_many_quick_replies")
+    .optional()
+    .default([]),
 });
+
+function buttonFields(input: z.infer<typeof createSchema>) {
+  const buttonText = input.buttonText || null;
+  const buttonUrl = input.buttonUrl || null;
+  if (!buttonText !== !buttonUrl) throw new HttpError(400, "button_text_and_url_required");
+  // Meta rejects two buttons with the same label, and so would the Funil (it couldn't tell them apart).
+  const labels = [...input.quickReplies, ...(buttonText ? [buttonText] : [])].map((l) => l.toLowerCase());
+  if (new Set(labels).size !== labels.length) throw new HttpError(400, "duplicate_button_text");
+  return { buttonText, buttonUrl, quickReplies: input.quickReplies };
+}
 
 export async function createTemplate(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
@@ -57,6 +80,7 @@ export async function createTemplate(req: Request, res: Response) {
   if (input.bodyExamples.length !== variableCount) {
     throw new HttpError(400, "body_examples_count_mismatch");
   }
+  const buttons = buttonFields(input);
 
   const template = await prisma.messageTemplate.create({
     data: {
@@ -68,6 +92,7 @@ export async function createTemplate(req: Request, res: Response) {
       bodyText: input.bodyText,
       variableCount,
       bodyExamples: input.bodyExamples,
+      ...buttons,
     },
   });
   res.status(201).json(template);
@@ -92,6 +117,7 @@ export async function updateTemplate(req: Request, res: Response) {
   if (input.bodyExamples.length !== variableCount) {
     throw new HttpError(400, "body_examples_count_mismatch");
   }
+  const buttons = buttonFields(input);
 
   const updated = await prisma.messageTemplate.update({
     where: { id: template.id },
@@ -102,6 +128,7 @@ export async function updateTemplate(req: Request, res: Response) {
       bodyText: input.bodyText,
       variableCount,
       bodyExamples: input.bodyExamples,
+      ...buttons,
       // Editing a rejected template clears the old reason — it no longer describes the new content.
       rejectionReason: null,
     },
@@ -133,6 +160,20 @@ export async function submitTemplate(req: Request, res: Response) {
           text: template.bodyText,
           ...(template.bodyExamples.length ? { example: { body_text: [template.bodyExamples] } } : {}),
         },
+        ...(template.quickReplies.length || (template.buttonText && template.buttonUrl)
+          ? [
+              {
+                type: "BUTTONS",
+                // Meta requires quick replies to sit together, so they go first and the link last.
+                buttons: [
+                  ...template.quickReplies.map((text) => ({ type: "QUICK_REPLY", text })),
+                  ...(template.buttonText && template.buttonUrl
+                    ? [{ type: "URL", text: template.buttonText, url: template.buttonUrl }]
+                    : []),
+                ],
+              },
+            ]
+          : []),
       ],
     }),
   });

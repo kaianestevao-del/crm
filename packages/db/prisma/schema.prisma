@@ -654,6 +654,13 @@ model MessageTemplate {
   // Meta requires a sample value per {{n}} placeholder to approve a template — without it,
   // submission is rejected with INVALID_FORMAT. Ordered to match {{1}}, {{2}}...
   bodyExamples    String[]         @default([])
+  // Optional call-to-action button shown under the message that opens a fixed link. Static
+  // URL, so sending needs no button parameters — both are set or both are null.
+  buttonText      String?
+  buttonUrl       String?
+  // Quick-reply buttons ("Quero participar", ...). A tap comes back as a message with the
+  // button's label as its text, so a Funil whose keyword matches that label starts on its own.
+  quickReplies    String[]         @default([])
   metaTemplateId  String?
   status          TemplateStatus   @default(DRAFT)
   rejectionReason String?
