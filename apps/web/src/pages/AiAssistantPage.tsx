@@ -182,7 +182,7 @@ function SchedulingCard({ settings, onChange }: { settings: AiSettings; onChange
       </div>
       <p className="mb-3 text-xs text-gray-500">
         A IA envia este link só depois que a paciente confirmar que respondeu o questionário. Desativado (ou sem link), ela
-        pergunta se prefere manhã ou tarde e passa para a equipe agendar.
+        avisa ao enviar o questionário que o horário da pré-consulta é escolhido no final dele mesmo.
       </p>
       <div className="flex gap-2">
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." className={inputClass} />

@@ -115,7 +115,7 @@ export function buildSystemPrompt(
     ),
     schedulingUrl
       ? `- Link de agendamento da pré-consulta: ${schedulingUrl.trim()}\n  Quando enviar: só depois que a pessoa confirmar que respondeu o questionário da pré-consulta.`
-      : "- Link de agendamento da pré-consulta: (não disponível — quando chegar a hora de agendar, pergunte se prefere manhã ou tarde e transfira para a equipe)",
+      : "- Agendamento da pré-consulta: é feito no próprio questionário da pré-consulta — ao terminar de responder, a pessoa já escolhe o horário lá mesmo. Por isso, sempre que enviar o link do questionário, avise junto que, ao finalizar, ela já agenda o horário da pré-consulta por ali. Não envie outro link de agendamento nem ofereça marcar horário pela conversa.",
   ].join("\n");
 
   return `Você é a assistente virtual que atende o WhatsApp de ${orgName}. Você conversa com pessoas interessadas nos serviços e com pacientes, tirando dúvidas sobre planos, valores, agenda e funcionamento do atendimento.
