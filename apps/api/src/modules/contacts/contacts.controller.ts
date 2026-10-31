@@ -3,20 +3,26 @@ import { z } from "zod";
 import ExcelJS from "exceljs";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
+import { ORIGIN_TAGS_PT, isMonthYearTagName, isObjectiveTagName } from "@crm/shared";
+
+const isOriginTagName = (name: string) => (ORIGIN_TAGS_PT as readonly string[]).includes(name);
 
 export async function listContacts(req: Request, res: Response) {
   const contacts = await prisma.contact.findMany({
     where: { organizationId: req.auth!.organizationId },
     include: {
       tags: { include: { tag: true } },
+      // Latest deal only — its stage is the contact's Kanban stage (same rule as the export).
+      deals: { orderBy: { createdAt: "desc" }, take: 1, select: { stage: { select: { id: true, name: true, order: true } } } },
       _count: { select: { conversations: true } },
     },
     orderBy: { createdAt: "desc" },
   });
   res.json(
-    contacts.map(({ tags, _count, ...contact }) => ({
+    contacts.map(({ tags, deals, _count, ...contact }) => ({
       ...contact,
       tags: tags.map((t) => t.tag),
+      stage: deals[0]?.stage ?? null,
       hasConversation: _count.conversations > 0,
     })),
   );
@@ -127,17 +133,20 @@ export async function removeContactTag(req: Request, res: Response) {
   res.json({ ok: true });
 }
 
-// Optional ?tagIds=a,b,c — when present, only contacts carrying at least one of those tags
-// (any tag type: objetivo, origem, or mês/ano) are exported. Absent/empty means "download all".
+// Same filters as the Contacts page, so "Baixar filtrados" downloads exactly what's on screen:
+// ?tagIds=a,b — the contact must carry *every* one of those tags (one per filter: mês/ano,
+// objetivo, origem); ?stageId=x — the contact's latest deal is in that Kanban stage ("none" =
+// no deal yet). Neither present means "download all".
 export async function exportContacts(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const tagIdsParam = typeof req.query.tagIds === "string" ? req.query.tagIds : "";
   const tagIds = tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
+  const stageId = typeof req.query.stageId === "string" ? req.query.stageId.trim() : "";
 
-  const contacts = await prisma.contact.findMany({
+  const found = await prisma.contact.findMany({
     where: {
       organizationId,
-      ...(tagIds.length > 0 ? { tags: { some: { tagId: { in: tagIds } } } } : {}),
+      ...(tagIds.length > 0 ? { AND: tagIds.map((tagId) => ({ tags: { some: { tagId } } })) } : {}),
     },
     include: {
       tags: { include: { tag: true } },
@@ -148,13 +157,19 @@ export async function exportContacts(req: Request, res: Response) {
     },
     orderBy: { createdAt: "desc" },
   });
+  const contacts = stageId
+    ? found.filter((c) => (stageId === "none" ? c.deals.length === 0 : c.deals[0]?.stageId === stageId))
+    : found;
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Contatos");
   sheet.columns = [
     { header: "Nome", key: "name", width: 28 },
     { header: "Telefone", key: "phoneNumber", width: 18 },
-    { header: "Abas (CRM)", key: "tags", width: 30 },
+    { header: "Mês/Ano de chegada", key: "month", width: 18 },
+    { header: "Objetivo", key: "objective", width: 28 },
+    { header: "Origem", key: "origin", width: 26 },
+    { header: "Outras abas", key: "tags", width: 30 },
     { header: "Comprou", key: "purchased", width: 10 },
     { header: "Valor total pago", key: "totalPaid", width: 16 },
     { header: "Etapa do funil", key: "stage", width: 20 },
@@ -167,10 +182,14 @@ export async function exportContacts(req: Request, res: Response) {
       (sum, deal) => sum + deal.payments.reduce((s, p) => s + p.value, 0),
       0,
     );
+    const names = contact.tags.map((t) => t.tag.name);
     sheet.addRow({
       name: contact.name ?? "",
       phoneNumber: `+${contact.phoneNumber}`,
-      tags: contact.tags.map((t) => t.tag.name).join(", "),
+      month: names.filter(isMonthYearTagName).join(", "),
+      objective: names.filter(isObjectiveTagName).join(", "),
+      origin: names.filter(isOriginTagName).join(", "),
+      tags: names.filter((n) => !isMonthYearTagName(n) && !isObjectiveTagName(n) && !isOriginTagName(n)).join(", "),
       purchased: totalPaid > 0 ? "Sim" : "Não",
       totalPaid,
       stage: contact.deals[0]?.stage.name ?? "",

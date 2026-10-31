@@ -6,11 +6,23 @@ import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
 import { Icon } from "../components/Icon";
 import { ContactPaymentModal } from "../components/ContactPaymentModal";
 import { useAuth } from "../context/AuthContext";
+import { MONTH_NAMES_PT, OBJECTIVE_TAGS_PT, ORIGIN_TAGS_PT, canonicalObjectiveTag, isMonthYearTagName } from "@crm/shared";
 
 interface Tag {
   id: string;
   name: string;
 }
+
+// "Setembro/2026" → sortable number, so the month dropdown lists the newest first.
+function monthSortKey(name: string) {
+  const [month, year] = name.split("/");
+  return Number(year) * 12 + MONTH_NAMES_PT.indexOf(month as (typeof MONTH_NAMES_PT)[number]);
+}
+
+const isOriginTagName = (name: string) => (ORIGIN_TAGS_PT as readonly string[]).includes(name);
+
+// Contacts with no deal yet — a value of its own in the Kanban stage filter.
+const NO_STAGE = "none";
 
 interface Contact {
   id: string;
@@ -18,6 +30,8 @@ interface Contact {
   phoneNumber: string;
   avatarUrl: string | null;
   tags: Tag[];
+  // The latest deal's Kanban stage, or null when the contact has no deal yet.
+  stage: { id: string; name: string; order: number } | null;
   hasConversation: boolean;
   createdAt: string;
 }
@@ -31,12 +45,15 @@ export function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
+  // One pick per filter (tag ids, a stage id or NO_STAGE); "" means "todos". Combined with AND.
+  const [monthFilter, setMonthFilter] = useState("");
+  const [objectiveFilter, setObjectiveFilter] = useState("");
+  const [originFilter, setOriginFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [saving, setSaving] = useState(false);
   const [showExport, setShowExport] = useState(false);
-  const [exportTagIds, setExportTagIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -54,22 +71,46 @@ export function ContactsPage() {
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [contacts]);
 
+  const monthTags = useMemo(
+    () => allTags.filter((t) => isMonthYearTagName(t.name)).sort((a, b) => monthSortKey(b.name) - monthSortKey(a.name)),
+    [allTags],
+  );
+  // In the fixed order of the six objectives, only the ones some contact actually has.
+  const objectiveTags = useMemo(
+    () =>
+      OBJECTIVE_TAGS_PT.flatMap((o) => {
+        const tag = allTags.find((t) => canonicalObjectiveTag(t.name) === o);
+        return tag ? [tag] : [];
+      }),
+    [allTags],
+  );
+  const originTags = useMemo(() => allTags.filter((t) => isOriginTagName(t.name)), [allTags]);
+  const stages = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; order: number }>();
+    for (const c of contacts) if (c.stage) map.set(c.stage.id, c.stage);
+    return Array.from(map.values()).sort((a, b) => a.order - b.order);
+  }, [contacts]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return contacts.filter((c) => {
-      if (tagFilter && !c.tags.some((t) => t.id === tagFilter)) return false;
+      for (const tagId of [monthFilter, objectiveFilter, originFilter]) {
+        if (tagId && !c.tags.some((t) => t.id === tagId)) return false;
+      }
+      if (stageFilter && (stageFilter === NO_STAGE ? c.stage !== null : c.stage?.id !== stageFilter)) return false;
       if (!query) return true;
       return contactLabel(c).toLowerCase().includes(query) || c.phoneNumber.includes(query);
     });
-  }, [contacts, search, tagFilter]);
+  }, [contacts, search, monthFilter, objectiveFilter, originFilter, stageFilter]);
 
-  function toggleExportTag(tagId: string) {
-    setExportTagIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagId)) next.delete(tagId);
-      else next.add(tagId);
-      return next;
-    });
+  const filterTagIds = [monthFilter, objectiveFilter, originFilter].filter(Boolean);
+  const hasFilters = filterTagIds.length > 0 || !!stageFilter;
+
+  function clearFilters() {
+    setMonthFilter("");
+    setObjectiveFilter("");
+    setOriginFilter("");
+    setStageFilter("");
   }
 
   async function exportAll() {
@@ -81,11 +122,16 @@ export function ContactsPage() {
     }
   }
 
-  async function exportSelected() {
-    if (exportTagIds.size === 0) return;
+  // Downloads the contacts matching the current filters (the name/phone search isn't applied —
+  // it's for finding one person, not for building a list).
+  async function exportFiltered() {
+    if (!hasFilters) return;
+    const params = new URLSearchParams();
+    if (filterTagIds.length) params.set("tagIds", filterTagIds.join(","));
+    if (stageFilter) params.set("stageId", stageFilter);
     setExporting(true);
     try {
-      await downloadFile(`/contacts/export?tagIds=${Array.from(exportTagIds).join(",")}`, "contatos.xlsx");
+      await downloadFile(`/contacts/export?${params.toString()}`, "contatos.xlsx");
     } finally {
       setExporting(false);
     }
@@ -171,27 +217,17 @@ export function ContactsPage() {
               Baixar tudo
             </button>
           </div>
-          <p className="mb-2 text-xs text-gray-500">Ou selecione só algumas abas para baixar apenas esses contatos:</p>
-          <div className="mb-3 flex flex-wrap gap-1">
-            {allTags.length === 0 && <p className="text-xs text-gray-400">Nenhuma aba criada ainda.</p>}
-            {allTags.map((tag) => (
-              <button
-                key={tag.id}
-                onClick={() => toggleExportTag(tag.id)}
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  exportTagIds.has(tag.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
-                }`}
-              >
-                {tag.name}
-              </button>
-            ))}
-          </div>
+          <p className="mb-3 text-xs text-gray-500">
+            {hasFilters
+              ? "Ou baixe só os contatos dos filtros escolhidos abaixo (mês/ano, objetivo, origem e etapa do Kanban)."
+              : "Para baixar só uma parte, escolha os filtros abaixo (mês/ano, objetivo, origem, etapa do Kanban)."}
+          </p>
           <button
-            onClick={exportSelected}
-            disabled={exporting || exportTagIds.size === 0}
+            onClick={exportFiltered}
+            disabled={exporting || !hasFilters}
             className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
           >
-            Baixar selecionados ({exportTagIds.size})
+            Baixar filtrados{hasFilters ? ` (${filtered.length})` : ""}
           </button>
         </div>
       )}
@@ -206,29 +242,23 @@ export function ContactsPage() {
             className="w-64 rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-brand focus:outline-none"
           />
         </div>
-        <button
-          type="button"
-          onClick={() => setTagFilter("")}
-          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-            tagFilter === "" ? "bg-brand text-white shadow-sm" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-          }`}
-        >
-          Todas as abas
-        </button>
-        {allTags.map((tag) => (
-          <button
-            key={tag.id}
-            type="button"
-            onClick={() => setTagFilter(tag.id)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-              tagFilter === tag.id
-                ? "bg-brand text-white shadow-sm"
-                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {tag.name}
+        <FilterSelect label="Mês/Ano" value={monthFilter} onChange={setMonthFilter} options={monthTags} />
+        <FilterSelect label="Objetivo" value={objectiveFilter} onChange={setObjectiveFilter} options={objectiveTags} />
+        <FilterSelect label="Origem" value={originFilter} onChange={setOriginFilter} options={originTags} />
+        <FilterSelect
+          label="Etapa do Kanban"
+          value={stageFilter}
+          onChange={setStageFilter}
+          options={[...stages, { id: NO_STAGE, name: "Sem etapa no Kanban" }]}
+        />
+        {hasFilters && (
+          <button type="button" onClick={clearFilters} className="text-xs font-medium text-gray-500 hover:underline">
+            Limpar filtros
           </button>
-        ))}
+        )}
+        <span className="text-xs text-gray-400">
+          {filtered.length} de {contacts.length} contatos
+        </span>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
@@ -237,6 +267,7 @@ export function ContactsPage() {
             <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400">
               <th className="px-5 py-3 font-medium">Contato</th>
               <th className="px-5 py-3 font-medium">Telefone</th>
+              <th className="px-5 py-3 font-medium">Etapa do Kanban</th>
               <th className="px-5 py-3 font-medium">Abas</th>
               {canLaunchPayment && <th className="px-5 py-3 font-medium">Lançamento</th>}
               <th className="px-5 py-3 font-medium"></th>
@@ -286,6 +317,7 @@ export function ContactsPage() {
                   </div>
                 </td>
                 <td className="px-5 py-3 text-gray-600">+{contact.phoneNumber}</td>
+                <td className="px-5 py-3 text-xs text-gray-600">{contact.stage?.name ?? <span className="text-gray-300">—</span>}</td>
                 <td className="px-5 py-3">
                   <div className="flex flex-wrap gap-1">
                     {contact.tags.map((tag) => (
@@ -320,7 +352,7 @@ export function ContactsPage() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={canLaunchPayment ? 5 : 4} className="px-4 py-6 text-center text-sm text-gray-400">
+                <td colSpan={canLaunchPayment ? 6 : 5} className="px-4 py-6 text-center text-sm text-gray-400">
                   Nenhum contato encontrado.
                 </td>
               </tr>
@@ -335,5 +367,35 @@ export function ContactsPage() {
         />
       )}
     </div>
+  );
+}
+
+// A dropdown filter — "Todos" plus one option per value; highlighted while something is picked.
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { id: string; name: string }[];
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`max-w-[220px] rounded-xl border px-3 py-2 text-xs font-medium shadow-sm focus:border-brand focus:outline-none ${
+        value ? "border-brand bg-brand/10 text-brand-dark" : "border-gray-200 bg-white text-gray-600"
+      }`}
+    >
+      <option value="">{label}: todos</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.name}
+        </option>
+      ))}
+    </select>
   );
 }
