@@ -90,6 +90,13 @@ export const ORIGIN_TAGS_PT = [
   "Parcerias Médicas",
 ] as const;
 
+// "Objetivo" tags (e.g. "Ganho de massa muscular") are every tag that isn't an arrival month or an
+// origin — same split the Inbox filter and the contact's "+ Objetivo" picker use. `extraOrigins`
+// are the AI keywords' origin tags, which may be custom names outside ORIGIN_TAGS_PT.
+export function isObjectiveTagName(name: string, extraOrigins: (string | null)[] = []): boolean {
+  return !isMonthYearTagName(name) && !(ORIGIN_TAGS_PT as readonly string[]).includes(name) && !extraOrigins.includes(name);
+}
+
 export enum SessionStatus {
   PENDING = "PENDING",
   CONNECTED = "CONNECTED",

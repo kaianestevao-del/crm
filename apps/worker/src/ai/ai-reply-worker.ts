@@ -4,10 +4,11 @@ import {
   QUEUE_AI_REPLIES,
   QUEUE_OUTBOUND_MESSAGES,
   AiReplyJob,
-  OutboundMessageJob,
+  OutboundMessageSequenceJob,
   MessageDirection,
   MessageStatus,
   MessageType,
+  isObjectiveTagName,
 } from "@crm/shared";
 import {
   AiError,
@@ -28,7 +29,7 @@ import { hasActiveFlowRun } from "../flows/flow-inbound";
 const prisma = getPrismaClient();
 
 const aiRepliesQueue = new Queue<AiReplyJob>(QUEUE_AI_REPLIES, { connection: createRedisClient() });
-const outboundMessagesQueue = new Queue<OutboundMessageJob>(QUEUE_OUTBOUND_MESSAGES, { connection: createRedisClient() });
+const outboundMessagesQueue = new Queue<OutboundMessageSequenceJob>(QUEUE_OUTBOUND_MESSAGES, { connection: createRedisClient() });
 
 // Guard rails — the assistant must never run away with a conversation:
 // - it waits 30s to 1min (random, so it doesn't feel like a bot) after the last inbound message,
@@ -40,8 +41,11 @@ const TYPING_RECHECK_MS = 10_000;
 const MAX_TYPING_WAITS = 12;
 // - at most this many replies per conversation in 24h, then it hands off to the team;
 const MAX_REPLIES_PER_DAY = 25;
-// - a reply longer than this is not sent (hand off instead) — real replies are a few lines;
+// - a reply longer than this (all its messages together) is not sent (hand off instead) — real
+//   replies are a few short lines;
 const MAX_REPLY_CHARS = 1200;
+// Pause between the short messages of one reply, on top of each one's "digitando…".
+const BETWEEN_MESSAGES_MS = 1_500;
 // How much of the conversation the assistant reads.
 const HISTORY_LIMIT = 40;
 
@@ -176,12 +180,16 @@ async function processAiReply(job: AiReplyJob) {
     .map((m) => ({ role: m.direction === MessageDirection.INBOUND ? ("customer" as const) : ("assistant" as const), text: turnText(m) }))
     .filter((t) => t.text);
 
-  const [plans, links] = await Promise.all([
+  const [plans, links, tags, keywords] = await Promise.all([
     prisma.aiPlan.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
     prisma.aiLink.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
+    prisma.tag.findMany({ where: { organizationId }, orderBy: { name: "asc" } }),
+    prisma.aiKeyword.findMany({ where: { organizationId }, select: { origin: true } }),
   ]);
+  const origins = keywords.map((k) => k.origin);
+  const objectiveTags = tags.filter((t) => isObjectiveTagName(t.name, origins));
   const schedulingUrl = org.aiSchedulingEnabled && org.aiSchedulingUrl?.trim() ? org.aiSchedulingUrl.trim() : null;
-  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, schedulingUrl);
+  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, schedulingUrl, objectiveTags.map((t) => t.name));
   const context = buildConversationContext({
     contactName: conversation.contact.name,
     objective: conversation.contact.objective,
@@ -219,11 +227,18 @@ async function processAiReply(job: AiReplyJob) {
   // whatever she adds.
   if (await waitForTyping(job, conversation.whatsappSessionId, conversation.contact.waJid)) return;
 
-  if (reply.reply) await sendAiMessage(organizationId, conversation, reply.reply);
+  if (reply.messages.length) await sendAiMessages(organizationId, conversation, reply.messages);
 
   if (reply.objective && reply.objective !== conversation.contact.objective) {
     await prisma.contact.update({ where: { id: conversation.contactId }, data: { objective: reply.objective.slice(0, 200) } });
     publishRealtimeEvent({ type: "contact.updated", organizationId, contactId: conversation.contactId });
+  }
+
+  // The "Objetivo" tag the team used to add by hand — only one that already exists, never created.
+  const objectiveTag = reply.objectiveTag && objectiveTags.find((t) => t.name.trim().toLowerCase() === reply.objectiveTag.toLowerCase());
+  if (objectiveTag) {
+    const added = await prisma.contactTag.createMany({ data: [{ contactId: conversation.contactId, tagId: objectiveTag.id }], skipDuplicates: true });
+    if (added.count) publishRealtimeEvent({ type: "contact.updated", organizationId, contactId: conversation.contactId });
   }
 
   await advanceDeal(org, conversation.contactId, conversation.contact.name ?? conversation.contact.phoneNumber, reply.stage).catch((err) =>
@@ -233,25 +248,13 @@ async function processAiReply(job: AiReplyJob) {
   if (reply.handoff) await handOff(organizationId, conversationId, conversation.contactId, reply.handoffReason || "A IA transferiu a conversa.");
 }
 
-async function sendAiMessage(
+// Records each short message and sends them as one sequence job, so they reach the customer in
+// order (separate jobs could run in parallel), each with its own "digitando…".
+async function sendAiMessages(
   organizationId: string,
   conversation: { id: string; whatsappSessionId: string; contact: { waJid: string } },
-  text: string,
+  texts: string[],
 ) {
-  const message = await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      direction: MessageDirection.OUTBOUND,
-      type: MessageType.TEXT,
-      content: text,
-      status: MessageStatus.PENDING,
-      sentByAi: true,
-    },
-  });
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
-  publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message });
-  publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
-
   // Cloud API shows "digitando…" against her last message.
   const lastInbound = await prisma.message.findFirst({
     where: { conversationId: conversation.id, direction: MessageDirection.INBOUND, waMessageId: { not: null } },
@@ -259,15 +262,36 @@ async function sendAiMessage(
     select: { waMessageId: true },
   });
 
-  await outboundMessagesQueue.add("send", {
+  const steps: OutboundMessageSequenceJob["steps"] = [];
+  for (const text of texts) {
+    const message = await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: MessageDirection.OUTBOUND,
+        type: MessageType.TEXT,
+        content: text,
+        status: MessageStatus.PENDING,
+        sentByAi: true,
+      },
+    });
+    publishRealtimeEvent({ type: "message.new", organizationId, conversationId: conversation.id, message });
+    steps.push({
+      messageId: message.id,
+      text,
+      typingMs: typingDuration(text),
+      typingForWaMessageId: lastInbound?.waMessageId ?? undefined,
+    });
+  }
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+  publishRealtimeEvent({ type: "conversation.updated", organizationId, conversationId: conversation.id });
+
+  await outboundMessagesQueue.add("send-sequence", {
     organizationId,
     sessionId: conversation.whatsappSessionId,
     conversationId: conversation.id,
-    messageId: message.id,
     waJid: conversation.contact.waJid,
-    text,
-    typingMs: typingDuration(text),
-    typingForWaMessageId: lastInbound?.waMessageId ?? undefined,
+    delayMs: BETWEEN_MESSAGES_MS,
+    steps,
   });
 }
 

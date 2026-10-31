@@ -52,13 +52,15 @@ const STAGE_LABELS: Record<string, string> = {
 interface SimTurn {
   role: "customer" | "assistant";
   text: string;
-  // Only on assistant turns produced by the simulator.
+  // Only on assistant turns produced by the simulator: the separate WhatsApp messages `text` joins.
+  messages?: string[];
   handoff?: boolean;
   handoffReason?: string;
   costUsd?: number;
   cacheReadTokens?: number;
   stage?: string;
   objective?: string;
+  objectiveTag?: string;
 }
 
 function errorCode(err: unknown) {
@@ -690,12 +692,14 @@ function Simulator() {
         {
           role: "assistant",
           text: res.data.reply,
+          messages: res.data.messages,
           handoff: res.data.handoff,
           handoffReason: res.data.handoffReason,
           costUsd: res.data.estimatedCostUsd,
           cacheReadTokens: res.data.usage.cacheReadTokens,
           stage: res.data.stage,
           objective: res.data.objective,
+          objectiveTag: res.data.objectiveTag,
         },
       ]);
     } catch (err) {
@@ -748,11 +752,11 @@ function Simulator() {
             </div>
           ) : (
             <div key={i} className="flex flex-col items-end gap-1">
-              {turn.text && (
-                <p className="max-w-[80%] whitespace-pre-wrap rounded-xl bg-[#d9fdd3] px-3 py-2 text-sm text-gray-800 shadow-sm">
-                  {turn.text}
+              {(turn.messages ?? (turn.text ? [turn.text] : [])).map((m, j) => (
+                <p key={j} className="max-w-[80%] whitespace-pre-wrap rounded-xl bg-[#d9fdd3] px-3 py-2 text-sm text-gray-800 shadow-sm">
+                  {m}
                 </p>
-              )}
+              ))}
               {turn.handoff && (
                 <p className="max-w-[80%] rounded-lg bg-amber-100 px-2 py-1 text-xs text-amber-800">
                   ⚠️ Transferiu para humano{turn.handoffReason ? `: ${turn.handoffReason}` : ""}
@@ -762,6 +766,7 @@ function Simulator() {
                 <p className="text-right text-[11px] text-gray-500">
                   {turn.stage && `Kanban: ${STAGE_LABELS[turn.stage] ?? turn.stage}`}
                   {turn.objective && ` · Objetivo: ${turn.objective}`}
+                  {turn.objectiveTag && ` · Etiqueta: ${turn.objectiveTag}`}
                   <br />≈ US$ {turn.costUsd.toFixed(4)}
                   {turn.cacheReadTokens ? " · prompt em cache" : ""}
                 </p>
