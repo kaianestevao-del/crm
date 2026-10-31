@@ -15,7 +15,6 @@ import { quickRepliesRouter } from "./modules/quick-replies/quick-replies.routes
 import { notesRouter } from "./modules/notes/notes.routes";
 import { tagsRouter } from "./modules/tags/tags.routes";
 import { organizationsRouter } from "./modules/organizations/organizations.routes";
-import { whatsappLabelsRouter } from "./modules/whatsapp-labels/whatsapp-labels.routes";
 import { scheduledMessagesRouter } from "./modules/scheduled-messages/scheduled-messages.routes";
 import { autoTagRulesRouter } from "./modules/auto-tag-rules/auto-tag-rules.routes";
 import { teamRouter } from "./modules/team/team.routes";
@@ -53,7 +52,6 @@ app.use("/quick-replies", quickRepliesRouter);
 app.use("/notes", notesRouter);
 app.use("/tags", tagsRouter);
 app.use("/organizations", organizationsRouter);
-app.use("/whatsapp-labels", whatsappLabelsRouter);
 app.use(scheduledMessagesRouter);
 app.use("/auto-tag-rules", autoTagRulesRouter);
 app.use("/team", teamRouter);

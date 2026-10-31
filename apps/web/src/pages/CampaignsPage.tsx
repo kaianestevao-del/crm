@@ -4,7 +4,7 @@ import { getSocket } from "../lib/socket";
 import { CAMPAIGN_PARAM_TAGS, fillTemplateBody, renderCampaignParam } from "@crm/shared";
 
 type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "DONE" | "FAILED";
-type AudienceType = "ALL" | "TAG" | "LABEL" | "CONTACTS";
+type AudienceType = "ALL" | "TAG" | "CONTACTS";
 
 interface Template {
   id: string;
@@ -17,11 +17,6 @@ interface Template {
 }
 
 interface Tag {
-  id: string;
-  name: string;
-}
-
-interface WhatsappLabel {
   id: string;
   name: string;
 }
@@ -57,9 +52,9 @@ interface CampaignEditData {
   id: string;
   name: string;
   templateId: string;
-  audienceType: AudienceType;
+  // "LABEL" only on old campaigns from when WhatsApp labels existed.
+  audienceType: AudienceType | "LABEL";
   audienceTagId: string | null;
-  audienceLabelId: string | null;
   audienceContactIds: string[];
   templateParams: string[];
 }
@@ -313,7 +308,6 @@ function SendConfirmation({
 function CampaignWizard({
   templates,
   tags,
-  labels,
   contacts,
   editing,
   onDone,
@@ -321,7 +315,6 @@ function CampaignWizard({
 }: {
   templates: Template[];
   tags: Tag[];
-  labels: WhatsappLabel[];
   contacts: Contact[];
   editing?: CampaignEditData | null;
   onDone: () => void;
@@ -329,9 +322,12 @@ function CampaignWizard({
 }) {
   const [name, setName] = useState(editing?.name ?? "");
   const [templateId, setTemplateId] = useState(editing?.templateId ?? "");
-  const [audienceType, setAudienceType] = useState<AudienceType>(editing?.audienceType ?? "ALL");
+  // An old campaign aimed at a WhatsApp label (removed) opens on "Por Aba" with nothing picked, so
+  // it can't be saved until someone chooses a new audience — never silently "Todos os contatos".
+  const [audienceType, setAudienceType] = useState<AudienceType>(
+    editing?.audienceType === "LABEL" ? "TAG" : editing?.audienceType ?? "ALL",
+  );
   const [audienceTagId, setAudienceTagId] = useState(editing?.audienceTagId ?? "");
-  const [audienceLabelId, setAudienceLabelId] = useState(editing?.audienceLabelId ?? "");
   const [audienceContactIds, setAudienceContactIds] = useState<string[]>(editing?.audienceContactIds ?? []);
   const [templateParams, setTemplateParams] = useState<string[]>(editing?.templateParams ?? []);
   const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
@@ -383,7 +379,6 @@ function CampaignWizard({
     e.preventDefault();
     if (!name.trim() || !templateId || !paramsFilled) return;
     if (audienceType === "TAG" && !audienceTagId) return;
-    if (audienceType === "LABEL" && !audienceLabelId) return;
     if (audienceType === "CONTACTS" && audienceContactIds.length === 0) return;
     setSaving(true);
     setError(null);
@@ -392,7 +387,6 @@ function CampaignWizard({
       templateId,
       audienceType,
       audienceTagId: audienceType === "TAG" ? audienceTagId : undefined,
-      audienceLabelId: audienceType === "LABEL" ? audienceLabelId : undefined,
       audienceContactIds: audienceType === "CONTACTS" ? audienceContactIds : undefined,
       templateParams: params,
     };
@@ -523,7 +517,7 @@ function CampaignWizard({
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-500">Público</label>
         <div className="flex flex-wrap gap-2">
-          {(["ALL", "TAG", "LABEL", "CONTACTS"] as const).map((v) => (
+          {(["ALL", "TAG", "CONTACTS"] as const).map((v) => (
             <button
               key={v}
               type="button"
@@ -532,7 +526,7 @@ function CampaignWizard({
                 audienceType === v ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
               }`}
             >
-              {v === "ALL" ? "Todos os contatos" : v === "TAG" ? "Por Aba" : v === "LABEL" ? "Por Etiqueta" : "Contatos específicos"}
+              {v === "ALL" ? "Todos os contatos" : v === "TAG" ? "Por Aba" : "Contatos específicos"}
             </button>
           ))}
         </div>
@@ -546,20 +540,6 @@ function CampaignWizard({
             {tags.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {audienceType === "LABEL" && (
-          <select
-            value={audienceLabelId}
-            onChange={(e) => setAudienceLabelId(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-          >
-            <option value="">Selecione a etiqueta...</option>
-            {labels.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
               </option>
             ))}
           </select>
@@ -762,7 +742,6 @@ export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [labels, setLabels] = useState<WhatsappLabel[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [wizardState, setWizardState] = useState<WizardState | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -782,7 +761,6 @@ export function CampaignsPage() {
       .catch(() => {})
       .finally(() => api.get("/templates").then((res) => setTemplates(res.data)));
     api.get("/tags").then((res) => setTags(res.data));
-    api.get("/whatsapp-labels").then((res) => setLabels(res.data));
     api.get("/contacts").then((res) => setContacts(res.data));
   }, []);
 
@@ -807,7 +785,6 @@ export function CampaignsPage() {
         templateId: c.templateId,
         audienceType: c.audienceType,
         audienceTagId: c.audienceTagId,
-        audienceLabelId: c.audienceLabelId,
         audienceContactIds: c.audienceContactIds ?? [],
         templateParams: c.templateParams ?? [],
       },
@@ -835,7 +812,6 @@ export function CampaignsPage() {
         <CampaignWizard
           templates={templates}
           tags={tags}
-          labels={labels}
           contacts={contacts}
           editing={wizardState.mode === "edit" ? wizardState.campaign : null}
           onDone={() => {

@@ -3,23 +3,20 @@ import { z } from "zod";
 import ExcelJS from "exceljs";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
-import { labelCommandsQueue } from "../../queues";
 
 export async function listContacts(req: Request, res: Response) {
   const contacts = await prisma.contact.findMany({
     where: { organizationId: req.auth!.organizationId },
     include: {
       tags: { include: { tag: true } },
-      whatsappLabels: { include: { label: true } },
       _count: { select: { conversations: true } },
     },
     orderBy: { createdAt: "desc" },
   });
   res.json(
-    contacts.map(({ tags, whatsappLabels, _count, ...contact }) => ({
+    contacts.map(({ tags, _count, ...contact }) => ({
       ...contact,
       tags: tags.map((t) => t.tag),
-      whatsappLabels: whatsappLabels.map((l) => l.label),
       hasConversation: _count.conversations > 0,
     })),
   );
@@ -130,53 +127,6 @@ export async function removeContactTag(req: Request, res: Response) {
   res.json({ ok: true });
 }
 
-// A contact isn't tied to a single WhatsApp session in the schema — it's tied to whichever
-// session(s) it has conversations with. We resolve the most recently active one for actions
-// (like adding a WhatsApp label) that need a live socket, falling back to the org's only
-// connected session for a contact that has no conversation yet.
-async function resolveSessionIdForContact(organizationId: string, contactId: string): Promise<string> {
-  const conversation = await prisma.conversation.findFirst({
-    where: { organizationId, contactId, whatsappSession: { archivedAt: null } },
-    orderBy: { lastMessageAt: "desc" },
-    select: { whatsappSessionId: true },
-  });
-  if (conversation) return conversation.whatsappSessionId;
-
-  const session = await prisma.whatsappSession.findFirst({
-    where: { organizationId, status: "CONNECTED", archivedAt: null },
-  });
-  if (!session) throw new HttpError(400, "no_connected_whatsapp_session");
-  return session.id;
-}
-
-const addWaLabelSchema = z.object({ waLabelId: z.string() });
-
-export async function addContactWhatsappLabel(req: Request, res: Response) {
-  const organizationId = req.auth!.organizationId;
-  const contact = await getOwnedContact(organizationId, req.params.id);
-  const input = addWaLabelSchema.parse(req.body);
-  const sessionId = await resolveSessionIdForContact(organizationId, contact.id);
-
-  // Fire-and-forget: WhatsApp's own `labels.association` event is what actually links the
-  // label to this contact in our database once the phone confirms it.
-  await labelCommandsQueue.add("add", { action: "add", sessionId, waJid: contact.waJid, waLabelId: input.waLabelId });
-  res.status(202).json({ ok: true });
-}
-
-export async function removeContactWhatsappLabel(req: Request, res: Response) {
-  const organizationId = req.auth!.organizationId;
-  const contact = await getOwnedContact(organizationId, req.params.id);
-  const sessionId = await resolveSessionIdForContact(organizationId, contact.id);
-
-  await labelCommandsQueue.add("remove", {
-    action: "remove",
-    sessionId,
-    waJid: contact.waJid,
-    waLabelId: req.params.labelId,
-  });
-  res.status(202).json({ ok: true });
-}
-
 // Optional ?tagIds=a,b,c — when present, only contacts carrying at least one of those tags
 // (any tag type: objetivo, origem, or mês/ano) are exported. Absent/empty means "download all".
 export async function exportContacts(req: Request, res: Response) {
@@ -191,7 +141,6 @@ export async function exportContacts(req: Request, res: Response) {
     },
     include: {
       tags: { include: { tag: true } },
-      whatsappLabels: { include: { label: true } },
       deals: {
         include: { payments: true, stage: true },
         orderBy: { createdAt: "desc" },
@@ -206,7 +155,6 @@ export async function exportContacts(req: Request, res: Response) {
     { header: "Nome", key: "name", width: 28 },
     { header: "Telefone", key: "phoneNumber", width: 18 },
     { header: "Abas (CRM)", key: "tags", width: 30 },
-    { header: "Etiquetas do WhatsApp", key: "whatsappLabels", width: 30 },
     { header: "Comprou", key: "purchased", width: 10 },
     { header: "Valor total pago", key: "totalPaid", width: 16 },
     { header: "Etapa do funil", key: "stage", width: 20 },
@@ -223,7 +171,6 @@ export async function exportContacts(req: Request, res: Response) {
       name: contact.name ?? "",
       phoneNumber: `+${contact.phoneNumber}`,
       tags: contact.tags.map((t) => t.tag.name).join(", "),
-      whatsappLabels: contact.whatsappLabels.map((l) => l.label.name).join(", "),
       purchased: totalPaid > 0 ? "Sim" : "Não",
       totalPaid,
       stage: contact.deals[0]?.stage.name ?? "",

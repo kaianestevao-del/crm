@@ -25,7 +25,7 @@ export async function listConversations(req: Request, res: Response) {
     // comes back on its own the next time the contact writes in (see session-manager.ts).
     where: { organizationId, status: "OPEN" },
     include: {
-      contact: { include: { tags: { include: { tag: true } }, whatsappLabels: { include: { label: true } } } },
+      contact: { include: { tags: { include: { tag: true } } } },
       assignedUser: { select: { id: true, name: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
     },
@@ -37,7 +37,6 @@ export async function listConversations(req: Request, res: Response) {
       contact: {
         ...contact,
         tags: contact.tags.map((t) => t.tag),
-        whatsappLabels: contact.whatsappLabels.map((l) => l.label),
       },
     })),
   );
@@ -126,7 +125,7 @@ export async function startConversation(req: Request, res: Response) {
     update: {},
     create: { organizationId, whatsappSessionId: session.id, contactId: contact.id },
     include: {
-      contact: { include: { tags: { include: { tag: true } }, whatsappLabels: { include: { label: true } } } },
+      contact: { include: { tags: { include: { tag: true } } } },
       assignedUser: { select: { id: true, name: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 1 },
     },
@@ -138,7 +137,6 @@ export async function startConversation(req: Request, res: Response) {
     contact: {
       ...fullContact,
       tags: fullContact.tags.map((t) => t.tag),
-      whatsappLabels: fullContact.whatsappLabels.map((l) => l.label),
     },
   });
 }

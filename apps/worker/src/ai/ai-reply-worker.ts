@@ -8,7 +8,8 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-  isObjectiveTagName,
+  OBJECTIVE_TAGS_PT,
+  canonicalObjectiveTag,
 } from "@crm/shared";
 import {
   AiError,
@@ -99,6 +100,21 @@ async function waitForTyping(job: AiReplyJob, sessionId: string, waJid: string) 
   return true;
 }
 
+// Reuses the org's existing Tag for that objective (even one typed by hand as "Saúde em geral"),
+// creating the canonical one only when there's none yet.
+async function addObjectiveTag(organizationId: string, contactId: string, objective: string) {
+  const tags = await prisma.tag.findMany({ where: { organizationId } });
+  const tag =
+    tags.find((t) => canonicalObjectiveTag(t.name) === objective) ??
+    (await prisma.tag.upsert({
+      where: { organizationId_name: { organizationId, name: objective } },
+      update: {},
+      create: { organizationId, name: objective },
+    }));
+  const added = await prisma.contactTag.createMany({ data: [{ contactId, tagId: tag.id }], skipDuplicates: true });
+  if (added.count) publishRealtimeEvent({ type: "contact.updated", organizationId, contactId });
+}
+
 async function tagContact(organizationId: string, contactId: string, tagName: string) {
   const tag = await prisma.tag.upsert({
     where: { organizationId_name: { organizationId, name: tagName } },
@@ -180,16 +196,12 @@ async function processAiReply(job: AiReplyJob) {
     .map((m) => ({ role: m.direction === MessageDirection.INBOUND ? ("customer" as const) : ("assistant" as const), text: turnText(m) }))
     .filter((t) => t.text);
 
-  const [plans, links, tags, keywords] = await Promise.all([
+  const [plans, links] = await Promise.all([
     prisma.aiPlan.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
     prisma.aiLink.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
-    prisma.tag.findMany({ where: { organizationId }, orderBy: { name: "asc" } }),
-    prisma.aiKeyword.findMany({ where: { organizationId }, select: { origin: true } }),
   ]);
-  const origins = keywords.map((k) => k.origin);
-  const objectiveTags = tags.filter((t) => isObjectiveTagName(t.name, origins));
   const schedulingUrl = org.aiSchedulingEnabled && org.aiSchedulingUrl?.trim() ? org.aiSchedulingUrl.trim() : null;
-  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, schedulingUrl, objectiveTags.map((t) => t.name));
+  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, schedulingUrl, [...OBJECTIVE_TAGS_PT]);
   const context = buildConversationContext({
     contactName: conversation.contact.name,
     objective: conversation.contact.objective,
@@ -234,12 +246,9 @@ async function processAiReply(job: AiReplyJob) {
     publishRealtimeEvent({ type: "contact.updated", organizationId, contactId: conversation.contactId });
   }
 
-  // The "Objetivo" tag the team used to add by hand — only one that already exists, never created.
-  const objectiveTag = reply.objectiveTag && objectiveTags.find((t) => t.name.trim().toLowerCase() === reply.objectiveTag.toLowerCase());
-  if (objectiveTag) {
-    const added = await prisma.contactTag.createMany({ data: [{ contactId: conversation.contactId, tagId: objectiveTag.id }], skipDuplicates: true });
-    if (added.count) publishRealtimeEvent({ type: "contact.updated", organizationId, contactId: conversation.contactId });
-  }
+  // The "Objetivo" tag the team used to add by hand — only one of the six fixed objectives.
+  const objective = reply.objectiveTag ? canonicalObjectiveTag(reply.objectiveTag) : null;
+  if (objective) await addObjectiveTag(organizationId, conversation.contactId, objective);
 
   await advanceDeal(org, conversation.contactId, conversation.contact.name ?? conversation.contact.phoneNumber, reply.stage).catch((err) =>
     console.error("ai_advance_deal_failed", err),

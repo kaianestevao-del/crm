@@ -204,13 +204,6 @@ export async function updateSessionPhoneNumber(req: Request, res: Response) {
   res.json(toSessionResponse(updated));
 }
 
-export async function resyncLabels(req: Request, res: Response) {
-  const session = await getOwnedSession(req.auth!.organizationId, req.params.id);
-  if (session.provider === "CLOUD_API") throw new HttpError(400, "not_supported_for_cloud_api");
-  await sessionCommandsQueue.add("resync-labels", { sessionId: session.id, command: "RESYNC_LABELS" });
-  res.json({ ok: true });
-}
-
 // Soft-delete only — the underlying Conversations/Messages that went through this number are
 // never touched, so a patient's history stays intact even after the connection linking it is
 // removed. Logs the device out first so it stops appearing in the phone's own linked-devices

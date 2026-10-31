@@ -11,7 +11,6 @@ process.on("uncaughtException", (err) => console.error("worker_uncaught_exceptio
 import { createSessionCommandsWorker } from "./queues/session-commands-worker";
 import { createOutboundMessagesWorker } from "./queues/outbound-messages-worker";
 import { createTranscribeAudioWorker } from "./queues/transcribe-audio-worker";
-import { createLabelCommandsWorker } from "./queues/label-commands-worker";
 import { createScheduledMessagesWorker } from "./queues/scheduled-messages-worker";
 import { createInboundCloudMessagesWorker } from "./queues/inbound-cloud-messages-worker";
 import { createCampaignDispatchWorker } from "./queues/campaign-dispatch-worker";
@@ -23,7 +22,6 @@ async function main() {
   createSessionCommandsWorker();
   createOutboundMessagesWorker();
   createTranscribeAudioWorker();
-  createLabelCommandsWorker();
   createScheduledMessagesWorker();
   createInboundCloudMessagesWorker();
   createCampaignDispatchWorker();
@@ -35,7 +33,7 @@ async function main() {
   await startAllPersistedSessions();
 
   console.log(
-    "Worker started: session commands, outbound messages, transcription, labels, scheduled messages and Cloud API webhooks are being processed.",
+    "Worker started: session commands, outbound messages, transcription, scheduled messages and Cloud API webhooks are being processed.",
   );
 }
 

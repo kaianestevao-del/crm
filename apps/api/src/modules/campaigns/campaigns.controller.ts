@@ -16,18 +16,13 @@ async function getOwnedCampaign(organizationId: string, id: string) {
 
 async function resolveRecipients(
   organizationId: string,
-  audienceType: "TAG" | "LABEL" | "ALL" | "CONTACTS",
+  audienceType: "TAG" | "ALL" | "CONTACTS",
   audienceTagId?: string,
-  audienceLabelId?: string,
   audienceContactIds?: string[],
 ) {
   if (audienceType === "TAG") {
     if (!audienceTagId) throw new HttpError(400, "audienceTagId_required");
     return prisma.contact.findMany({ where: { organizationId, tags: { some: { tagId: audienceTagId } } } });
-  }
-  if (audienceType === "LABEL") {
-    if (!audienceLabelId) throw new HttpError(400, "audienceLabelId_required");
-    return prisma.contact.findMany({ where: { organizationId, whatsappLabels: { some: { labelId: audienceLabelId } } } });
   }
   if (audienceType === "CONTACTS") {
     if (!audienceContactIds?.length) throw new HttpError(400, "audienceContactIds_required");
@@ -62,14 +57,12 @@ const createSchema = z
   .object({
     name: z.string().min(1),
     templateId: z.string().min(1),
-    audienceType: z.enum(["TAG", "LABEL", "ALL", "CONTACTS"]),
+    audienceType: z.enum(["TAG", "ALL", "CONTACTS"]),
     audienceTagId: z.string().optional(),
-    audienceLabelId: z.string().optional(),
     audienceContactIds: z.array(z.string()).optional(),
     templateParams: z.array(z.string()).default([]),
   })
   .refine((d) => d.audienceType !== "TAG" || !!d.audienceTagId, { message: "audienceTagId_required" })
-  .refine((d) => d.audienceType !== "LABEL" || !!d.audienceLabelId, { message: "audienceLabelId_required" })
   .refine((d) => d.audienceType !== "CONTACTS" || !!d.audienceContactIds?.length, { message: "audienceContactIds_required" });
 
 // Creates the campaign as DRAFT with its recipients already resolved, and returns a cost
@@ -93,7 +86,6 @@ export async function createCampaign(req: Request, res: Response) {
     organizationId,
     input.audienceType,
     input.audienceTagId,
-    input.audienceLabelId,
     input.audienceContactIds,
   );
   if (recipients.length === 0) throw new HttpError(400, "no_recipients_found");
@@ -107,7 +99,8 @@ export async function createCampaign(req: Request, res: Response) {
         name: input.name,
         audienceType: input.audienceType,
         audienceTagId: input.audienceType === "TAG" ? input.audienceTagId : null,
-        audienceLabelId: input.audienceType === "LABEL" ? input.audienceLabelId : null,
+        // WhatsApp labels were removed — an old LABEL campaign saved again loses its label.
+        audienceLabelId: null,
         audienceContactIds: input.audienceType === "CONTACTS" ? input.audienceContactIds! : [],
         templateParams: input.templateParams,
       },
@@ -145,7 +138,6 @@ export async function updateCampaign(req: Request, res: Response) {
     organizationId,
     input.audienceType,
     input.audienceTagId,
-    input.audienceLabelId,
     input.audienceContactIds,
   );
   if (recipients.length === 0) throw new HttpError(400, "no_recipients_found");
@@ -159,7 +151,8 @@ export async function updateCampaign(req: Request, res: Response) {
         name: input.name,
         audienceType: input.audienceType,
         audienceTagId: input.audienceType === "TAG" ? input.audienceTagId : null,
-        audienceLabelId: input.audienceType === "LABEL" ? input.audienceLabelId : null,
+        // WhatsApp labels were removed — an old LABEL campaign saved again loses its label.
+        audienceLabelId: null,
         audienceContactIds: input.audienceType === "CONTACTS" ? input.audienceContactIds! : [],
         templateParams: input.templateParams,
       },

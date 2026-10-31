@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, ORIGIN_TAGS_PT } from "@crm/shared";
+import { MessageDirection, MessageType, MessageStatus, isMonthYearTagName, isObjectiveTagName, ORIGIN_TAGS_PT } from "@crm/shared";
 import { api, API_URL } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { QuickReplyPicker, QuickReply } from "../components/QuickReplyPicker";
@@ -9,7 +9,6 @@ import { EmojiPicker } from "../components/EmojiPicker";
 import { ContactNotes } from "../components/ContactNotes";
 import { ContactTags, Tag } from "../components/ContactTags";
 import { ContactTimeline } from "../components/ContactTimeline";
-import { ContactWhatsappLabels, WhatsappLabel } from "../components/ContactWhatsappLabels";
 import { ContactDeal } from "../components/ContactDeal";
 import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
 import { useAuth } from "../context/AuthContext";
@@ -29,7 +28,6 @@ interface Contact {
   avatarUrl: string | null;
   objective: string | null;
   tags: Tag[];
-  whatsappLabels: WhatsappLabel[];
 }
 
 interface Conversation {
@@ -318,7 +316,6 @@ export function InboxPage() {
   const [sendingQuickReply, setSendingQuickReply] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
   const [originFilter, setOriginFilter] = useState<Set<string>>(new Set());
   const [monthFilter, setMonthFilter] = useState<Set<string>>(new Set());
   const [objetivoFilter, setObjetivoFilter] = useState<Set<string>>(new Set());
@@ -389,7 +386,7 @@ export function InboxPage() {
     const onConversationUpdated = () => {
       refreshConversations();
     };
-    // Fires when WhatsApp confirms a native label was added/removed/created for a contact.
+    // Fires when a contact changes (name, objective, tags — e.g. the AI tagging an objective).
     const onContactUpdated = () => {
       refreshConversations();
     };
@@ -608,17 +605,13 @@ export function InboxPage() {
   }
 
   const allTags = Array.from(new Map(conversations.flatMap((c) => c.contact.tags).map((t) => [t.id, t])).values());
-  const allLabels = Array.from(
-    new Map(conversations.flatMap((c) => c.contact.whatsappLabels).map((l) => [l.id, l])).values(),
-  );
   const isOriginTagName = (name: string) => (ORIGIN_TAGS_PT as readonly string[]).includes(name);
   const originTags = allTags.filter((t) => isOriginTagName(t.name));
   const monthTags = allTags.filter((t) => isMonthYearTagName(t.name));
-  const objetivoTags = allTags.filter((t) => !isOriginTagName(t.name) && !isMonthYearTagName(t.name));
+  const objetivoTags = allTags.filter((t) => isObjectiveTagName(t.name));
 
   const activeFilterCount =
     (unreadOnly ? 1 : 0) +
-    (labelFilter.size > 0 ? 1 : 0) +
     (originFilter.size > 0 ? 1 : 0) +
     (monthFilter.size > 0 ? 1 : 0) +
     (objetivoFilter.size > 0 ? 1 : 0);
@@ -626,7 +619,6 @@ export function InboxPage() {
   const normalizedSearch = search.trim().toLowerCase();
   const visibleConversations = conversations
     .filter((c) => !unreadOnly || c.unreadCount > 0)
-    .filter((c) => labelFilter.size === 0 || c.contact.whatsappLabels.some((l) => labelFilter.has(l.id)))
     .filter((c) => originFilter.size === 0 || c.contact.tags.some((t) => originFilter.has(t.id)))
     .filter((c) => monthFilter.size === 0 || c.contact.tags.some((t) => monthFilter.has(t.id)))
     .filter((c) => objetivoFilter.size === 0 || c.contact.tags.some((t) => objetivoFilter.has(t.id)))
@@ -689,25 +681,6 @@ export function InboxPage() {
               Apenas não lidas
             </label>
 
-            {allLabels.length > 0 && (
-              <div>
-                <p className="mb-1 text-xs font-medium text-gray-400">Etiquetas</p>
-                <div className="flex flex-wrap gap-1">
-                  {allLabels.map((label) => (
-                    <button
-                      key={label.id}
-                      onClick={() => toggleInSet(setLabelFilter, label.id)}
-                      className={`rounded-full px-2 py-0.5 text-xs ${
-                        labelFilter.has(label.id) ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
-                      }`}
-                    >
-                      {label.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {originTags.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-medium text-gray-400">Origem</p>
@@ -769,7 +742,6 @@ export function InboxPage() {
               <button
                 onClick={() => {
                   setUnreadOnly(false);
-                  setLabelFilter(new Set());
                   setOriginFilter(new Set());
                   setMonthFilter(new Set());
                   setObjetivoFilter(new Set());
@@ -1003,18 +975,6 @@ export function InboxPage() {
                   onChange={(tags) =>
                     setConversations((prev) =>
                       prev.map((c) => (c.id === selectedConversation.id ? { ...c, contact: { ...c.contact, tags } } : c)),
-                    )
-                  }
-                />
-                <span className="h-4 w-px bg-gray-200" />
-                <ContactWhatsappLabels
-                  contactId={selectedConversation.contact.id}
-                  labels={selectedConversation.contact.whatsappLabels}
-                  onChange={(whatsappLabels) =>
-                    setConversations((prev) =>
-                      prev.map((c) =>
-                        c.id === selectedConversation.id ? { ...c, contact: { ...c.contact, whatsappLabels } } : c,
-                      ),
                     )
                   }
                 />

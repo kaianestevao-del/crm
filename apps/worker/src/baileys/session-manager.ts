@@ -240,103 +240,12 @@ export async function startSession(sessionId: string, pairingPhoneNumber?: strin
       }
     }
   });
-
-  // WhatsApp's own native labels (Business feature). `labels.edit` syncs the label
-  // definitions themselves (create/rename/delete); `labels.association` syncs which chats
-  // wear which label. Both fire automatically during app-state sync, and again whenever the
-  // label is changed from any device — including our own addLabel/addChatLabel calls below.
-  sock.ev.on("labels.edit", async (label) => {
-    try {
-      if (label.deleted) {
-        await prisma.whatsappLabel.deleteMany({ where: { whatsappSessionId: sessionId, waLabelId: label.id } });
-        return;
-      }
-      await prisma.whatsappLabel.upsert({
-        where: { whatsappSessionId_waLabelId: { whatsappSessionId: sessionId, waLabelId: label.id } },
-        update: { name: label.name, color: label.color },
-        create: { whatsappSessionId: sessionId, waLabelId: label.id, name: label.name, color: label.color },
-      });
-    } catch (err) {
-      console.error("sync_label_edit_error", err);
-    }
-  });
-
-  sock.ev.on("labels.association", async ({ association, type }) => {
-    if (association.type !== "label_jid") return; // we only track chat-level labels, not per-message ones
-    try {
-      const [label, contact] = await Promise.all([
-        prisma.whatsappLabel.findUnique({
-          where: { whatsappSessionId_waLabelId: { whatsappSessionId: sessionId, waLabelId: association.labelId } },
-        }),
-        prisma.contact.findUnique({
-          where: { organizationId_waJid: { organizationId: session.organizationId, waJid: association.chatId } },
-        }),
-      ]);
-      if (!label || !contact) return; // label/contact not known to us yet — nothing to associate
-
-      if (type === "add") {
-        await prisma.contactWhatsappLabel.upsert({
-          where: { contactId_labelId: { contactId: contact.id, labelId: label.id } },
-          update: {},
-          create: { contactId: contact.id, labelId: label.id },
-        });
-      } else {
-        await prisma.contactWhatsappLabel.deleteMany({ where: { contactId: contact.id, labelId: label.id } });
-      }
-      publishRealtimeEvent({ type: "contact.updated", organizationId: session.organizationId, contactId: contact.id });
-    } catch (err) {
-      console.error("sync_label_association_error", err);
-    }
-  });
 }
 
 // WhatsApp only sends a contact's typing indicator to whoever subscribed to their presence.
 // Best-effort and a no-op for Cloud API sessions (no socket, no presence).
 function watchContactTyping(sessionId: string, jid: string) {
   activeSockets.get(sessionId)?.presenceSubscribe(jid).catch(() => {});
-}
-
-export async function addWhatsappLabelToChat(sessionId: string, waJid: string, waLabelId: string) {
-  const sock = activeSockets.get(sessionId);
-  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
-  await sock.addChatLabel(waJid, waLabelId);
-}
-
-export async function removeWhatsappLabelFromChat(sessionId: string, waJid: string, waLabelId: string) {
-  const sock = activeSockets.get(sessionId);
-  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
-  await sock.removeChatLabel(waJid, waLabelId);
-}
-
-// Best-effort: creating a brand-new label (as opposed to toggling one that already exists)
-// relies on WhatsApp accepting a client-generated id, which isn't as thoroughly documented
-// as the read path above. Picks the first small integer id (as a string) not already used by
-// this session, mirroring how the official apps number their first ~20 custom labels.
-export async function createWhatsappLabel(sessionId: string, name: string, color = 0) {
-  const sock = activeSockets.get(sessionId);
-  if (!sock || !sock.user?.id) throw new Error(`session_not_connected:${sessionId}`);
-
-  const existingIds = new Set(
-    (await prisma.whatsappLabel.findMany({ where: { whatsappSessionId: sessionId }, select: { waLabelId: true } })).map(
-      (l) => l.waLabelId,
-    ),
-  );
-  let nextId = 1;
-  while (existingIds.has(String(nextId)) && nextId < 100) nextId++;
-
-  await sock.addLabel(sock.user.id, { id: String(nextId), name, color, deleted: false });
-}
-
-// Baileys only pulls the account's *entire* label set automatically once, right after a fresh
-// QR pairing (when it first receives the app-state encryption key). A plain reconnect — or
-// pairing while a duplicate worker process is also racing to sync the same account, which is
-// what actually happened here — never repeats that full sync, so labels that already existed
-// before pairing can end up silently missing. This re-runs that same sync on demand, without
-// requiring the user to log out and re-scan a QR code.
-export async function resyncLabels(sessionId: string) {
-  const sock = activeSockets.get(sessionId);
-  if (!sock) throw new Error(`session_not_connected:${sessionId}`);
-  await sock.resyncAppState(["critical_block", "critical_unblock_low", "regular_high", "regular_low", "regular"], true);
 }
 
 const EXTENSION_BY_MIME: Record<string, string> = {

@@ -219,10 +219,6 @@ export function ConnectWhatsappPage() {
     await api.post(`/whatsapp-sessions/${id}/logout`);
   }
 
-  async function handleResyncLabels(id: string) {
-    await api.post(`/whatsapp-sessions/${id}/resync-labels`);
-  }
-
   async function handleRefreshPhoneNumber(id: string) {
     const res = await api.post(`/whatsapp-sessions/${id}/refresh-phone-number`);
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, phoneNumber: res.data.phoneNumber } : s)));
@@ -394,11 +390,6 @@ export function ConnectWhatsappPage() {
                     🔄 Buscar número
                   </button>
                 )
-              )}
-              {session.provider === "BAILEYS" && session.status === SessionStatus.CONNECTED && (
-                <button onClick={() => handleResyncLabels(session.id)} className="text-xs font-medium text-brand-dark hover:underline">
-                  🔄 Ressincronizar etiquetas
-                </button>
               )}
               {session.provider === "CLOUD_API" && (
                 <button

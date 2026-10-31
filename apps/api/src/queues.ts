@@ -2,14 +2,12 @@ import { Queue } from "bullmq";
 import {
   QUEUE_OUTBOUND_MESSAGES,
   QUEUE_SESSION_COMMANDS,
-  QUEUE_LABEL_COMMANDS,
   QUEUE_SCHEDULED_MESSAGES,
   QUEUE_INBOUND_CLOUD_MESSAGES,
   QUEUE_CAMPAIGN_DISPATCH,
   OutboundMessageJob,
   OutboundMessageSequenceJob,
   SessionCommandJob,
-  LabelCommandJob,
   ScheduledMessageJob,
   InboundCloudMessageJob,
   CampaignDispatchJob,
@@ -26,7 +24,6 @@ export const outboundMessagesQueue = new Queue<OutboundMessageJob | OutboundMess
   defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
 });
 export const sessionCommandsQueue = new Queue<SessionCommandJob>(QUEUE_SESSION_COMMANDS, { connection });
-export const labelCommandsQueue = new Queue<LabelCommandJob>(QUEUE_LABEL_COMMANDS, { connection });
 export const scheduledMessagesQueue = new Queue<ScheduledMessageJob>(QUEUE_SCHEDULED_MESSAGES, { connection });
 export const inboundCloudMessagesQueue = new Queue<InboundCloudMessageJob>(QUEUE_INBOUND_CLOUD_MESSAGES, { connection });
 export const campaignDispatchQueue = new Queue<CampaignDispatchJob>(QUEUE_CAMPAIGN_DISPATCH, { connection });

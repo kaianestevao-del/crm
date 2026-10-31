@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Role } from "@crm/shared";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
-import { ORIGIN_TAGS_PT, isObjectiveTagName } from "@crm/shared";
+import { ORIGIN_TAGS_PT, OBJECTIVE_TAGS_PT } from "@crm/shared";
 import { AiError, buildSystemPrompt, findActivationKeyword, generateAiReply } from "@crm/ai";
 
 // The whole AI tab is OWNER/ADMIN only — it holds the API key and the rules the assistant
@@ -229,18 +229,15 @@ export async function simulateAiReply(req: Request, res: Response) {
   assertOwnerOrAdmin(req);
   const organizationId = req.auth!.organizationId;
   const { turns } = simulateSchema.parse(req.body);
-  const [org, plans, links, keywords, tags] = await Promise.all([
+  const [org, plans, links, keywords] = await Promise.all([
     prisma.organization.findUniqueOrThrow({ where: { id: organizationId } }),
     prisma.aiPlan.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
     prisma.aiLink.findMany({ where: { organizationId }, orderBy: { order: "asc" } }),
     prisma.aiKeyword.findMany({ where: { organizationId } }),
-    prisma.tag.findMany({ where: { organizationId }, orderBy: { name: "asc" } }),
   ]);
   if (!org.anthropicApiKey) throw new HttpError(400, "anthropic_api_key_missing");
 
-  const origins = keywords.map((k) => k.origin);
-  const objectiveTags = tags.filter((t) => isObjectiveTagName(t.name, origins)).map((t) => t.name);
-  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, activeSchedulingUrl(org), objectiveTags);
+  const systemPrompt = buildSystemPrompt(org.name, org.aiPrompt, plans, links, activeSchedulingUrl(org), [...OBJECTIVE_TAGS_PT]);
   let reply;
   try {
     reply = await generateAiReply(org.anthropicApiKey, systemPrompt, turns);

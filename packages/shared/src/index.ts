@@ -90,11 +90,39 @@ export const ORIGIN_TAGS_PT = [
   "Parcerias Médicas",
 ] as const;
 
-// "Objetivo" tags (e.g. "Ganho de massa muscular") are every tag that isn't an arrival month or an
-// origin — same split the Inbox filter and the contact's "+ Objetivo" picker use. `extraOrigins`
-// are the AI keywords' origin tags, which may be custom names outside ORIGIN_TAGS_PT.
-export function isObjectiveTagName(name: string, extraOrigins: (string | null)[] = []): boolean {
-  return !isMonthYearTagName(name) && !(ORIGIN_TAGS_PT as readonly string[]).includes(name) && !extraOrigins.includes(name);
+// The only "Objetivo" tags a contact can carry — the contact's "+ Objetivo" picker, the Inbox
+// filter and the AI assistant all use exactly this list. Any other Tag (origins, arrival month,
+// old hand-made ones like "Paciente ativo") is never treated as an objective; patient status
+// comes from the Kanban stage instead.
+export const OBJECTIVE_TAGS_PT = [
+  "Ganho de massa muscular",
+  "Definição muscular",
+  "Emagrecimento",
+  "Saúde da mulher",
+  "Saúde geral",
+  "Tratamento e comportamento alimentar",
+] as const;
+
+// Accent-, case- and filler-word-insensitive, so a Tag created by hand as "Saúde em geral" or
+// "ganho de massa muscular" still counts as the canonical objective.
+function objectiveKey(name: string) {
+  return name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !["e", "em", "de", "da", "do", "das", "dos"].includes(w))
+    .join(" ");
+}
+
+// The canonical objective a Tag name stands for, or null when it isn't one of the six.
+export function canonicalObjectiveTag(name: string): (typeof OBJECTIVE_TAGS_PT)[number] | null {
+  const key = objectiveKey(name);
+  return OBJECTIVE_TAGS_PT.find((o) => objectiveKey(o) === key) ?? null;
+}
+
+export function isObjectiveTagName(name: string): boolean {
+  return canonicalObjectiveTag(name) !== null;
 }
 
 export enum SessionStatus {
@@ -325,7 +353,7 @@ export interface InboundCloudMessageJob {
 export const WHATSAPP_PROVIDERS = ["BAILEYS", "CLOUD_API"] as const;
 export type WhatsappProvider = (typeof WHATSAPP_PROVIDERS)[number];
 
-export type SessionCommand = "START" | "LOGOUT" | "RESTART" | "RESYNC_LABELS";
+export type SessionCommand = "START" | "LOGOUT" | "RESTART";
 
 export interface SessionCommandJob {
   sessionId: string;
@@ -335,17 +363,6 @@ export interface SessionCommandJob {
   // number" flow works.
   pairingPhoneNumber?: string;
 }
-
-// Mirrors WhatsApp's own native Business labels via Baileys (addChatLabel/removeChatLabel/
-// addLabel). Fire-and-forget: the worker performs the action, and Baileys' own
-// `labels.edit`/`labels.association` events are what actually update our database — the API
-// never writes WhatsappLabel rows directly, only WhatsApp's own confirmation does.
-export const QUEUE_LABEL_COMMANDS = "label-commands";
-
-export type LabelCommandJob =
-  | { action: "add"; sessionId: string; waJid: string; waLabelId: string }
-  | { action: "remove"; sessionId: string; waJid: string; waLabelId: string }
-  | { action: "create"; sessionId: string; name: string; color?: number };
 
 // A single scheduled message tied to one conversation. The API enqueues this as a delayed
 // BullMQ job (jobId = the ScheduledMessage row's id, so it can be cancelled by removing the

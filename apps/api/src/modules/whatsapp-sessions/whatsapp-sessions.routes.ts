@@ -7,7 +7,6 @@ import {
   getSession,
   restartSession,
   logoutSession,
-  resyncLabels,
   deleteSession,
   refreshCloudApiPhoneNumber,
   updateCloudApiCredentials,
@@ -22,7 +21,6 @@ whatsappSessionsRouter.post("/", asyncHandler(createSession));
 whatsappSessionsRouter.get("/:id", asyncHandler(getSession));
 whatsappSessionsRouter.post("/:id/restart", asyncHandler(restartSession));
 whatsappSessionsRouter.post("/:id/logout", asyncHandler(logoutSession));
-whatsappSessionsRouter.post("/:id/resync-labels", asyncHandler(resyncLabels));
 whatsappSessionsRouter.post("/:id/refresh-phone-number", asyncHandler(refreshCloudApiPhoneNumber));
 whatsappSessionsRouter.patch("/:id/phone-number", asyncHandler(updateSessionPhoneNumber));
 whatsappSessionsRouter.patch("/:id/cloud-api-credentials", asyncHandler(updateCloudApiCredentials));
