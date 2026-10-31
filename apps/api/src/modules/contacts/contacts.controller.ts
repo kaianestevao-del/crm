@@ -162,9 +162,17 @@ export async function exportContacts(req: Request, res: Response) {
     },
     orderBy: { createdAt: "desc" },
   });
-  const contacts = stages.length
-    ? found.filter((c) => stages.includes(c.deals[0]?.stageId ?? "none"))
-    : found;
+  // One row per phone number — the same person saved twice (by phone and by WhatsApp's LID)
+  // shows up once; the most recent record wins.
+  const seenPhones = new Set<string>();
+  const contacts = found
+    .filter((c) => !stages.length || stages.includes(c.deals[0]?.stageId ?? "none"))
+    .filter((c) => {
+      const phone = c.phoneNumber.replace(/\D/g, "");
+      if (seenPhones.has(phone)) return false;
+      seenPhones.add(phone);
+      return true;
+    });
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Contatos");

@@ -29,6 +29,9 @@ const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
 app.use(
   express.json({
+    // A campaign "Por filtros" sends its whole contact list (a few thousand ids) in the body —
+    // well past express' 100kb default.
+    limit: "5mb",
     // Meta signs the exact bytes it sent (X-Hub-Signature-256) — keep the raw buffer around so
     // the webhook route can verify against it instead of a re-serialized (and possibly
     // byte-different) copy of the parsed body.

@@ -14,6 +14,18 @@ async function getOwnedCampaign(organizationId: string, id: string) {
   return campaign;
 }
 
+// Never the same person twice: a contact is only listed once by its id, and two contact records
+// with the same phone number (saved by phone and by WhatsApp's LID) count as one recipient.
+function uniqueByPhone<C extends { phoneNumber: string }>(contacts: C[]) {
+  const seen = new Set<string>();
+  return contacts.filter((c) => {
+    const phone = c.phoneNumber.replace(/\D/g, "");
+    if (seen.has(phone)) return false;
+    seen.add(phone);
+    return true;
+  });
+}
+
 async function resolveRecipients(
   organizationId: string,
   audienceType: "TAG" | "ALL" | "CONTACTS",
@@ -82,12 +94,12 @@ export async function createCampaign(req: Request, res: Response) {
   assertTemplateParams(template, input.templateParams);
   if (!session) throw new HttpError(400, "no_cloud_api_session_connected");
 
-  const recipients = await resolveRecipients(
+  const recipients = uniqueByPhone(await resolveRecipients(
     organizationId,
     input.audienceType,
     input.audienceTagId,
     input.audienceContactIds,
-  );
+  ));
   if (recipients.length === 0) throw new HttpError(400, "no_recipients_found");
 
   const campaign = await prisma.$transaction(async (tx) => {
@@ -134,12 +146,12 @@ export async function updateCampaign(req: Request, res: Response) {
   if (template.status !== "APPROVED") throw new HttpError(400, "template_not_approved");
   assertTemplateParams(template, input.templateParams);
 
-  const recipients = await resolveRecipients(
+  const recipients = uniqueByPhone(await resolveRecipients(
     organizationId,
     input.audienceType,
     input.audienceTagId,
     input.audienceContactIds,
-  );
+  ));
   if (recipients.length === 0) throw new HttpError(400, "no_recipients_found");
 
   const updated = await prisma.$transaction(async (tx) => {

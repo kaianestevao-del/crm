@@ -2,9 +2,12 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { CAMPAIGN_PARAM_TAGS, fillTemplateBody, renderCampaignParam } from "@crm/shared";
+import { ContactFilterBar, EMPTY_FILTERS, filterKeyForTag, uniqueByPhone, useContactFilters } from "../components/ContactFilters";
 
 type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "DONE" | "FAILED";
-type AudienceType = "ALL" | "TAG" | "CONTACTS";
+// "FILTERS" exists only in this screen: on save its matching contacts go to the API as a
+// CONTACTS list (recipients are resolved at save time anyway). "TAG" is only on old campaigns.
+type AudienceType = "ALL" | "FILTERS" | "CONTACTS";
 
 interface Template {
   id: string;
@@ -25,6 +28,10 @@ interface Contact {
   id: string;
   name: string | null;
   phoneNumber: string;
+  // From GET /contacts — what the "Por filtros" audience filters on. A contact just imported from
+  // a spreadsheet comes without them.
+  tags?: { id: string; name: string }[];
+  stage?: { id: string; name: string; order: number } | null;
 }
 
 interface CampaignListItem {
@@ -53,7 +60,7 @@ interface CampaignEditData {
   name: string;
   templateId: string;
   // "LABEL" only on old campaigns from when WhatsApp labels existed.
-  audienceType: AudienceType | "LABEL";
+  audienceType: "ALL" | "TAG" | "LABEL" | "CONTACTS";
   audienceTagId: string | null;
   audienceContactIds: string[];
   templateParams: string[];
@@ -322,12 +329,21 @@ function CampaignWizard({
 }) {
   const [name, setName] = useState(editing?.name ?? "");
   const [templateId, setTemplateId] = useState(editing?.templateId ?? "");
-  // An old campaign aimed at a WhatsApp label (removed) opens on "Por Aba" with nothing picked, so
-  // it can't be saved until someone chooses a new audience — never silently "Todos os contatos".
+  // An old "Por Aba" campaign opens on "Por filtros" with that tag pre-picked (when it's a
+  // mês/ano, objetivo or origem); an old WhatsApp-label one opens there with nothing picked. Either
+  // way it can't be saved until the filters pick someone — never silently "Todos os contatos".
   const [audienceType, setAudienceType] = useState<AudienceType>(
-    editing?.audienceType === "LABEL" ? "TAG" : editing?.audienceType ?? "ALL",
+    editing?.audienceType === "TAG" || editing?.audienceType === "LABEL" ? "FILTERS" : editing?.audienceType ?? "ALL",
   );
-  const [audienceTagId, setAudienceTagId] = useState(editing?.audienceTagId ?? "");
+  const oldTag = editing?.audienceType === "TAG" ? tags.find((t) => t.id === editing.audienceTagId) : undefined;
+  const oldTagKey = oldTag ? filterKeyForTag(oldTag.name) : null;
+  const filters = useContactFilters(
+    contacts.map((c) => ({ ...c, tags: c.tags ?? [] })),
+    oldTag && oldTagKey ? { ...EMPTY_FILTERS, [oldTagKey]: [oldTag.id] } : EMPTY_FILTERS,
+  );
+  // Each person once, even when they match several picks (outubro AND emagrecimento) or exist
+  // twice with the same phone number.
+  const filteredRecipients = uniqueByPhone(filters.matching);
   const [audienceContactIds, setAudienceContactIds] = useState<string[]>(editing?.audienceContactIds ?? []);
   const [templateParams, setTemplateParams] = useState<string[]>(editing?.templateParams ?? []);
   const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
@@ -378,16 +394,20 @@ function CampaignWizard({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim() || !templateId || !paramsFilled) return;
-    if (audienceType === "TAG" && !audienceTagId) return;
+    if (audienceType === "FILTERS" && (!filters.hasFilters || filteredRecipients.length === 0)) return;
     if (audienceType === "CONTACTS" && audienceContactIds.length === 0) return;
     setSaving(true);
     setError(null);
     const payload = {
       name: name.trim(),
       templateId,
-      audienceType,
-      audienceTagId: audienceType === "TAG" ? audienceTagId : undefined,
-      audienceContactIds: audienceType === "CONTACTS" ? audienceContactIds : undefined,
+      audienceType: audienceType === "FILTERS" ? "CONTACTS" : audienceType,
+      audienceContactIds:
+        audienceType === "FILTERS"
+          ? filteredRecipients.map((c) => c.id)
+          : audienceType === "CONTACTS"
+            ? audienceContactIds
+            : undefined,
       templateParams: params,
     };
     try {
@@ -517,7 +537,7 @@ function CampaignWizard({
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-500">Público</label>
         <div className="flex flex-wrap gap-2">
-          {(["ALL", "TAG", "CONTACTS"] as const).map((v) => (
+          {(["ALL", "FILTERS", "CONTACTS"] as const).map((v) => (
             <button
               key={v}
               type="button"
@@ -526,23 +546,25 @@ function CampaignWizard({
                 audienceType === v ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600"
               }`}
             >
-              {v === "ALL" ? "Todos os contatos" : v === "TAG" ? "Por Aba" : "Contatos específicos"}
+              {v === "ALL" ? "Todos os contatos" : v === "FILTERS" ? "Por filtros" : "Contatos específicos"}
             </button>
           ))}
         </div>
-        {audienceType === "TAG" && (
-          <select
-            value={audienceTagId}
-            onChange={(e) => setAudienceTagId(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
-          >
-            <option value="">Selecione a aba...</option>
-            {tags.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+        {audienceType === "FILTERS" && (
+          <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="mb-2 text-xs text-gray-500">
+              Os mesmos filtros da página Contatos. Dentro de um filtro vale qualquer opção marcada; entre filtros, todos
+              precisam bater. Quem aparece em mais de uma opção recebe uma vez só.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <ContactFilterBar filters={filters} />
+            </div>
+            <p className="mt-2 text-xs font-medium text-gray-700">
+              {filters.hasFilters
+                ? `${filteredRecipients.length} contato${filteredRecipients.length === 1 ? "" : "s"} vão receber`
+                : "Escolha pelo menos um filtro."}
+            </p>
+          </div>
         )}
         {audienceType === "CONTACTS" && (
           <ContactPicker
@@ -568,7 +590,8 @@ function CampaignWizard({
             !name.trim() ||
             !templateId ||
             !paramsFilled ||
-            (audienceType === "CONTACTS" && audienceContactIds.length === 0)
+            (audienceType === "CONTACTS" && audienceContactIds.length === 0) ||
+            (audienceType === "FILTERS" && (!filters.hasFilters || filteredRecipients.length === 0))
           }
           className="rounded-xl bg-brand-dark px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
         >
