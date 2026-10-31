@@ -3,7 +3,7 @@ import { z } from "zod";
 import ExcelJS from "exceljs";
 import { prisma } from "../../prisma";
 import { HttpError } from "../../utils/httpError";
-import { ORIGIN_TAGS_PT, isMonthYearTagName, isObjectiveTagName } from "@crm/shared";
+import { OBJECTIVE_TAGS_PT, ORIGIN_TAGS_PT, canonicalObjectiveTag, isMonthYearTagName, isObjectiveTagName } from "@crm/shared";
 
 const isOriginTagName = (name: string) => (ORIGIN_TAGS_PT as readonly string[]).includes(name);
 
@@ -214,4 +214,142 @@ export async function exportContacts(req: Request, res: Response) {
   res.setHeader("Content-Disposition", `attachment; filename="contatos.xlsx"`);
   await workbook.xlsx.write(res);
   res.end();
+}
+
+// ---------------------------------------------------------------------------------------------
+// "Vincular objetivo por planilha": a spreadsheet (e.g. a WaSpeed export) with a WhatsApp/phone
+// column, plus one of the six objectives. Every contact whose number is in it gets that
+// objective's tag. Nothing is ever duplicated: numbers are matched on DDD + last 8 digits (so
+// 55 75 9948-1471 and 55 75 9 9948-1471 are the same person), and a number not in the CRM is
+// only saved as a new contact when asked to (createMissing), via the same waJid upsert as the
+// rest of the CRM. dryRun only counts, without changing anything.
+
+const SHEET_PHONE_HEADERS = ["telefone", "whatsapp", "numero", "número", "phone", "celular"];
+const SHEET_NAME_HEADERS = ["nome", "name"];
+
+// Brazilian numbers compare without the country code and the optional 9th digit.
+function phoneKey(digits: string) {
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) return digits.slice(2, 4) + digits.slice(-8);
+  return digits;
+}
+
+function cellText(value: unknown): string {
+  if (value && typeof value === "object" && "text" in value) return String((value as { text: unknown }).text ?? "");
+  if (value && typeof value === "object" && "result" in value) return String((value as { result: unknown }).result ?? "");
+  return String(value ?? "");
+}
+
+const importObjectiveSchema = z.object({
+  objective: z.enum(OBJECTIVE_TAGS_PT),
+  dryRun: z.enum(["true", "false"]).default("true"),
+  createMissing: z.enum(["true", "false"]).default("false"),
+});
+
+export async function importObjectiveSpreadsheet(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const file = (req as Request & { file?: Express.Multer.File }).file;
+  if (!file) throw new HttpError(400, "file_required");
+  const input = importObjectiveSchema.parse(req.body);
+  const dryRun = input.dryRun === "true";
+  const createMissing = input.createMissing === "true";
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(file.buffer as unknown as ExcelJS.Buffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw new HttpError(400, "empty_spreadsheet");
+
+  let phoneCol = -1;
+  let nameCol = -1;
+  sheet.getRow(1).eachCell((cell, col) => {
+    const header = cellText(cell.value).trim().toLowerCase();
+    if (SHEET_PHONE_HEADERS.includes(header)) phoneCol = col;
+    if (SHEET_NAME_HEADERS.includes(header)) nameCol = col;
+  });
+  if (phoneCol === -1) throw new HttpError(400, "phone_column_not_found");
+
+  // One entry per person in the sheet, even if a number is repeated.
+  const rows = new Map<string, { digits: string; name: string | null }>();
+  let invalidRows = 0;
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    let digits = cellText(row.getCell(phoneCol).value).replace(/\D/g, "").replace(/^0+/, "");
+    if (!digits) continue;
+    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    if (digits.length < 10) {
+      invalidRows++;
+      continue;
+    }
+    const name = nameCol !== -1 ? cellText(row.getCell(nameCol).value).trim() || null : null;
+    const key = phoneKey(digits);
+    if (!rows.has(key)) rows.set(key, { digits, name });
+  }
+
+  const contacts = await prisma.contact.findMany({ where: { organizationId }, select: { id: true, phoneNumber: true } });
+  const byKey = new Map<string, string[]>();
+  for (const c of contacts) {
+    const key = phoneKey(c.phoneNumber.replace(/\D/g, ""));
+    byKey.set(key, [...(byKey.get(key) ?? []), c.id]);
+  }
+
+  const tags = await prisma.tag.findMany({ where: { organizationId } });
+  const existingTag = tags.find((t) => canonicalObjectiveTag(t.name) === input.objective);
+  const alreadyTagged = new Set(
+    existingTag ? (await prisma.contactTag.findMany({ where: { tagId: existingTag.id }, select: { contactId: true } })).map((c) => c.contactId) : [],
+  );
+
+  const matchedIds = new Set<string>();
+  const missing: { digits: string; name: string | null }[] = [];
+  for (const [key, row] of rows) {
+    const ids = byKey.get(key);
+    if (ids) ids.forEach((id) => matchedIds.add(id));
+    else missing.push(row);
+  }
+  const toTag = [...matchedIds].filter((id) => !alreadyTagged.has(id));
+
+  const summary = {
+    objective: input.objective,
+    numbersInSheet: rows.size,
+    invalidRows,
+    foundInCrm: rows.size - missing.length,
+    alreadyHadObjective: matchedIds.size - toTag.length,
+    willLink: toTag.length,
+    notInCrm: missing.length,
+    notInCrmSample: missing.slice(0, 20).map((m) => ({ phoneNumber: m.digits, name: m.name })),
+  };
+  if (dryRun) {
+    res.json({ ...summary, dryRun: true });
+    return;
+  }
+
+  const tag =
+    existingTag ??
+    (await prisma.tag.upsert({
+      where: { organizationId_name: { organizationId, name: input.objective } },
+      update: {},
+      create: { organizationId, name: input.objective },
+    }));
+
+  let created = 0;
+  const newIds: string[] = [];
+  if (createMissing) {
+    for (const m of missing) {
+      const waJid = `${m.digits}@s.whatsapp.net`;
+      const contact = await prisma.contact.upsert({
+        where: { organizationId_waJid: { organizationId, waJid } },
+        update: {},
+        create: { organizationId, waJid, phoneNumber: m.digits, name: m.name },
+      });
+      if (!matchedIds.has(contact.id)) {
+        newIds.push(contact.id);
+        created++;
+      }
+    }
+  }
+
+  const linked = await prisma.contactTag.createMany({
+    data: [...toTag, ...newIds].map((contactId) => ({ contactId, tagId: tag.id })),
+    skipDuplicates: true,
+  });
+
+  res.json({ ...summary, dryRun: false, linked: linked.count, created });
 }

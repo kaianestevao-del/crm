@@ -6,6 +6,7 @@ import { ContactAvatar, contactLabel } from "../components/ContactAvatar";
 import { Icon } from "../components/Icon";
 import { ContactPaymentModal } from "../components/ContactPaymentModal";
 import { useAuth } from "../context/AuthContext";
+import { ObjectiveImportPanel } from "../components/ObjectiveImportPanel";
 import { ContactFilterBar, uniqueByPhone, useContactFilters } from "../components/ContactFilters";
 
 interface Tag {
@@ -38,13 +39,18 @@ export function ContactsPage() {
   const [editingName, setEditingName] = useState("");
   const [saving, setSaving] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showObjectiveImport, setShowObjectiveImport] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  useEffect(() => {
-    api
+  function loadContacts() {
+    return api
       .get("/contacts")
       .then((res) => setContacts(res.data))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadContacts();
   }, []);
 
   const allTags = useMemo(() => {
@@ -116,6 +122,14 @@ export function ContactsPage() {
           <h1 className="text-lg font-semibold text-gray-900">Contatos</h1>
           <p className="text-sm text-gray-500">Base de contatos e conversas do WhatsApp.</p>
         </div>
+        <div className="flex gap-2">
+        <button
+          onClick={() => setShowObjectiveImport((v) => !v)}
+          className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
+        >
+          <Icon name="tag" className="h-3.5 w-3.5" />
+          Vincular objetivo por planilha
+        </button>
         <button
           onClick={() => setShowExport((v) => !v)}
           className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
@@ -123,6 +137,7 @@ export function ContactsPage() {
           <Icon name="download" className="h-3.5 w-3.5" />
           Baixar contatos
         </button>
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -154,6 +169,8 @@ export function ContactsPage() {
           <p className="mt-3 text-2xl font-semibold text-gray-900">{allTags.length}</p>
         </div>
       </div>
+
+      {showObjectiveImport && <ObjectiveImportPanel onDone={loadContacts} />}
 
       {showExport && (
         <div className="mb-4 max-w-xl rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
