@@ -74,18 +74,100 @@ async function getPatientCounts(organizationId: string) {
   return { active, vencida };
 }
 
-async function getAvgResponseSeconds(organizationId: string): Promise<number | null> {
+// "Geral" — every row is after this.
+const ALL_TIME = new Date(0);
+const PERIOD_DAYS = [1, 7, 15, 30, 90];
+
+// The Dashboard's averages block, recomputed for a period: ?days=1|7|15|30|90 (absent = geral).
+// Each average counts the events that *happened* in the period — replies sent, first payments,
+// follow-ups that ended, stages left, conversations started.
+export async function getDashboardAverages(req: Request, res: Response) {
+  const organizationId = req.auth!.organizationId;
+  const days = Number(req.query.days);
+  const since = PERIOD_DAYS.includes(days) ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : ALL_TIME;
+
+  const [avgResponseSeconds, firstPayment, followUpOutcomes, funnel, stageTimes] = await Promise.all([
+    getAvgResponseSeconds(organizationId, since),
+    getFirstPaymentStats(organizationId, since),
+    getFollowUpOutcomes(organizationId, since),
+    getMessageFunnel(organizationId, since),
+    getStageTimes(organizationId, since),
+  ]);
+  res.json({
+    days: since === ALL_TIME ? null : days,
+    avgResponseSeconds,
+    avgDaysToFirstPayment: firstPayment.avgDays,
+    avgMessagesToFirstPayment: firstPayment.avgMessages,
+    followUpOutcomes,
+    funnel,
+    stageTimes,
+  });
+}
+
+// How long leads spend in the funnel before it's decided: the average time in each regular stage
+// (Atendimento, Qualificando, Negociação… — every stage without a role), counted when the lead
+// leaves it; and the average time from the deal's first stage until it first enters Follow-up
+// and Unfollow, counted when it enters them.
+async function getStageTimes(organizationId: string, since: Date) {
+  const [perStage, untilDecision] = await Promise.all([
+    prisma.$queryRaw<{ stage_id: string; name: string; order: number; avg_days: number | null; leads: bigint }[]>`
+      SELECT ps.id AS stage_id, ps.name, ps."order",
+        AVG(EXTRACT(EPOCH FROM (dsh."exitedAt" - dsh."enteredAt")) / 86400.0) AS avg_days,
+        COUNT(*) AS leads
+      FROM "DealStageHistory" dsh
+      JOIN "PipelineStage" ps ON ps.id = dsh."stageId"
+      JOIN "Deal" d ON d.id = dsh."dealId"
+      WHERE d."organizationId" = ${organizationId} AND ps.role IS NULL
+        AND dsh."exitedAt" IS NOT NULL AND dsh."exitedAt" >= ${since}::timestamp AND dsh."exitedAt" >= dsh."enteredAt"
+      GROUP BY ps.id, ps.name, ps."order"
+      ORDER BY ps."order"
+    `,
+    prisma.$queryRaw<{ role: string; avg_days: number | null; leads: bigint }[]>`
+      WITH deal_start AS (
+        SELECT dsh."dealId", MIN(dsh."enteredAt") AS started_at
+        FROM "DealStageHistory" dsh JOIN "Deal" d ON d.id = dsh."dealId"
+        WHERE d."organizationId" = ${organizationId}
+        GROUP BY dsh."dealId"
+      ),
+      first_entry AS (
+        SELECT dsh."dealId", ps.role, MIN(dsh."enteredAt") AS entered_at
+        FROM "DealStageHistory" dsh
+        JOIN "PipelineStage" ps ON ps.id = dsh."stageId" AND ps.role IN ('FOLLOW_UP', 'UNFOLLOW')
+        JOIN "Deal" d ON d.id = dsh."dealId"
+        WHERE d."organizationId" = ${organizationId}
+        GROUP BY dsh."dealId", ps.role
+      )
+      SELECT fe.role, AVG(EXTRACT(EPOCH FROM (fe.entered_at - ds.started_at)) / 86400.0) AS avg_days, COUNT(*) AS leads
+      FROM first_entry fe JOIN deal_start ds ON ds."dealId" = fe."dealId"
+      WHERE fe.entered_at >= ${since}::timestamp AND fe.entered_at > ds.started_at
+      GROUP BY fe.role
+    `,
+  ]);
+  const decision = (role: string) => {
+    const row = untilDecision.find((r) => r.role === role);
+    return { avgDays: row?.avg_days == null ? null : Number(row.avg_days), leads: Number(row?.leads ?? 0) };
+  };
+  return {
+    perStage: perStage.map((r) => ({ name: r.name, avgDays: r.avg_days == null ? null : Number(r.avg_days), leads: Number(r.leads) })),
+    untilFollowUp: decision("FOLLOW_UP"),
+    untilUnfollow: decision("UNFOLLOW"),
+  };
+}
+
+async function getAvgResponseSeconds(organizationId: string, since = ALL_TIME): Promise<number | null> {
   const rows = await prisma.$queryRaw<{ avg_seconds: number | null }[]>`
     WITH ordered AS (
       SELECT
         m.direction,
+        m."createdAt",
         LAG(m.direction) OVER (PARTITION BY m."conversationId" ORDER BY m."createdAt") AS prev_direction,
         EXTRACT(EPOCH FROM (m."createdAt" - LAG(m."createdAt") OVER (PARTITION BY m."conversationId" ORDER BY m."createdAt"))) AS gap_seconds
       FROM "Message" m
       JOIN "Conversation" c ON c.id = m."conversationId"
       WHERE c."organizationId" = ${organizationId}
     )
-    SELECT AVG(gap_seconds) AS avg_seconds FROM ordered WHERE direction = 'OUTBOUND' AND prev_direction = 'INBOUND'
+    SELECT AVG(gap_seconds) AS avg_seconds FROM ordered
+    WHERE direction = 'OUTBOUND' AND prev_direction = 'INBOUND' AND "createdAt" >= ${since}::timestamp
   `;
   const value = rows[0]?.avg_seconds;
   return value == null ? null : Number(value);
@@ -98,7 +180,7 @@ async function getAvgResponseSeconds(organizationId: string): Promise<number | n
 // "Start" of the relationship = the contact's first message. Only payers with message history in
 // the CRM count: patients bulk-imported with a historical payment have no messages here, and
 // including them would drag every average to ~0.
-async function getFirstPaymentStats(organizationId: string) {
+async function getFirstPaymentStats(organizationId: string, since = ALL_TIME) {
   const rows = await prisma.$queryRaw<
     { avg_days: number | null; avg_inbound: number | null; avg_outbound: number | null }[]
   >`
@@ -108,6 +190,7 @@ async function getFirstPaymentStats(organizationId: string) {
       JOIN "Deal" d ON d.id = dp."dealId"
       WHERE d."organizationId" = ${organizationId}
       GROUP BY d."contactId"
+      HAVING MIN(dp."paidAt") >= ${since}::timestamp
     ),
     per_contact AS (
       SELECT
@@ -145,7 +228,7 @@ async function getFirstPaymentStats(organizationId: string) {
 // Conversion + give-up effort, over contacts that have message history in the CRM. Patients
 // bulk-imported with a historical payment (no messages here) are reported separately as
 // `paidWithoutHistory` instead of being counted as "contacted" — otherwise they inflate the rate.
-async function getMessageFunnel(organizationId: string) {
+async function getMessageFunnel(organizationId: string, since = ALL_TIME) {
   const rows = await prisma.$queryRaw<
     {
       contacted: bigint;
@@ -176,6 +259,7 @@ async function getMessageFunnel(organizationId: string) {
         fp.first_paid_at,
         uf.gave_up_at,
         COUNT(m.id) AS msg_total,
+        MIN(m."createdAt") AS first_msg_at,
         COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND') AS out_total,
         COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND' AND uf.gave_up_at IS NOT NULL AND m."createdAt" <= uf.gave_up_at) AS out_to_give_up
       FROM "Contact" c
@@ -185,6 +269,10 @@ async function getMessageFunnel(organizationId: string) {
       LEFT JOIN "Message" m ON m."conversationId" = conv.id
       WHERE c."organizationId" = ${organizationId}
       GROUP BY c.id, fp.first_paid_at, uf.gave_up_at
+    ),
+    -- In a period, only conversations that started in it (their outcome may come later).
+    in_period AS (
+      SELECT * FROM per_contact WHERE msg_total = 0 OR first_msg_at >= ${since}::timestamp
     )
     SELECT
       COUNT(*) FILTER (WHERE msg_total > 0) AS contacted,
@@ -193,7 +281,7 @@ async function getMessageFunnel(organizationId: string) {
       COUNT(*) FILTER (WHERE msg_total = 0 AND first_paid_at IS NOT NULL) AS paid_without_history,
       COUNT(*) FILTER (WHERE msg_total > 0 AND gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS gave_up,
       AVG(out_to_give_up) FILTER (WHERE msg_total > 0 AND gave_up_at IS NOT NULL AND first_paid_at IS NULL) AS avg_outbound_gave_up
-    FROM per_contact
+    FROM in_period
   `;
   const r = rows[0];
   const contacted = Number(r?.contacted ?? 0);
@@ -239,7 +327,7 @@ async function getRecentPayments(organizationId: string) {
   `;
 }
 
-async function getFollowUpOutcomes(organizationId: string) {
+async function getFollowUpOutcomes(organizationId: string, since = ALL_TIME) {
   const rows = await prisma.$queryRaw<{ avg_converted: number | null; avg_lost: number | null }[]>`
     WITH followup_periods AS (
       SELECT
@@ -249,6 +337,7 @@ async function getFollowUpOutcomes(organizationId: string) {
       JOIN "PipelineStage" ps ON ps.id = dsh."stageId"
       JOIN "Deal" d ON d.id = dsh."dealId"
       WHERE ps.role = 'FOLLOW_UP' AND d."organizationId" = ${organizationId} AND dsh."exitedAt" IS NOT NULL
+        AND dsh."exitedAt" >= ${since}::timestamp
     ),
     classified AS (
       SELECT fp.*, next_ps.role AS outcome_role

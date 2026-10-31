@@ -224,6 +224,35 @@ interface DashboardSummary {
   revenue: { total: number; avgTicket: number | null; avgLtv: number | null };
 }
 
+// The averages block, recomputed per period by GET /dashboard/averages.
+interface DashboardAverages {
+  days: number | null;
+  avgResponseSeconds: number | null;
+  avgDaysToFirstPayment: number | null;
+  avgMessagesToFirstPayment: { inbound: number; outbound: number; total: number } | null;
+  followUpOutcomes: { avgConverted: number | null; avgLost: number | null };
+  funnel?: MessageFunnel;
+  stageTimes?: {
+    perStage: { name: string; avgDays: number | null; leads: number }[];
+    untilFollowUp: { avgDays: number | null; leads: number };
+    untilUnfollow: { avgDays: number | null; leads: number };
+  };
+}
+
+// null = "Geral" (all history).
+const PERIODS: { days: number | null; label: string }[] = [
+  { days: null, label: "Geral" },
+  { days: 1, label: "24 horas" },
+  { days: 7, label: "7 dias" },
+  { days: 15, label: "15 dias" },
+  { days: 30, label: "30 dias" },
+  { days: 90, label: "90 dias" },
+];
+
+function periodHint(days: number | null) {
+  return days == null ? "Todo o período" : days === 1 ? "Últimas 24 horas" : `Últimos ${days} dias`;
+}
+
 const currencyFormatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 
@@ -270,12 +299,14 @@ function KpiCard({
   icon,
   tone,
   onClick,
+  hint,
 }: {
   label: string;
   value: string;
   icon: IconName;
   tone: keyof typeof tones;
   onClick?: () => void;
+  hint?: string;
 }) {
   const t = tones[tone];
   return (
@@ -296,6 +327,7 @@ function KpiCard({
         </span>
       </div>
       <p className={`mt-3 text-2xl font-semibold ${t.value}`}>{value}</p>
+      {hint && <p className="mt-1 text-[11px] text-gray-400">{hint}</p>}
       {onClick && <p className="mt-1 text-[11px] text-gray-400">Clique para ver a lista</p>}
     </div>
   );
@@ -579,6 +611,9 @@ export function DashboardPage() {
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [patientsModal, setPatientsModal] = useState<PatientRole | null>(null);
   const [yearFilter, setYearFilter] = useState<string>("all");
+  const [period, setPeriod] = useState<number | null>(null);
+  const [averages, setAverages] = useState<DashboardAverages | null>(null);
+  const [averagesLoading, setAveragesLoading] = useState(false);
 
   useEffect(() => {
     api
@@ -587,18 +622,50 @@ export function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAveragesLoading(true);
+    api
+      .get("/dashboard/averages", { params: period == null ? {} : { days: period } })
+      .then((res) => {
+        if (!cancelled) setAverages(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setAverages(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAveragesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [period]);
+
   if (loading) return <div className="p-6 text-sm text-gray-500">Carregando dashboard...</div>;
   if (!data) return <div className="p-6 text-sm text-gray-500">Não foi possível carregar o dashboard.</div>;
 
-  const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones; onClick?: () => void }[] = [
+  // The period-filtered averages — the summary's all-time values until the first answer arrives
+  // (or if the API isn't updated yet).
+  const m: DashboardAverages = averages ?? {
+    days: null,
+    avgResponseSeconds: data.avgResponseSeconds,
+    avgDaysToFirstPayment: data.avgDaysToFirstPayment,
+    avgMessagesToFirstPayment: data.avgMessagesToFirstPayment,
+    followUpOutcomes: data.followUpOutcomes,
+    funnel: data.funnel,
+  };
+  const hint = periodHint(averages ? averages.days : null);
+
+  const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones; onClick?: () => void; hint?: string }[] = [
     { label: "Pacientes Ativos", value: String(data.patients.active), icon: "users", tone: "emerald", onClick: () => setPatientsModal("ACTIVE_PATIENT") },
     { label: "Pacientes Vencidas", value: String(data.patients.vencida), icon: "alert", tone: "red", onClick: () => setPatientsModal("LOST_PATIENT") },
-    { label: "Tempo médio de resposta", value: formatSeconds(data.avgResponseSeconds), icon: "clock", tone: "brand" },
+    { label: "Tempo médio de resposta", value: formatSeconds(m.avgResponseSeconds), icon: "clock", tone: "brand", hint },
     {
       label: "Tempo médio até 1º pagamento",
-      value: formatDays(data.avgDaysToFirstPayment),
+      value: formatDays(m.avgDaysToFirstPayment),
       icon: "calendar",
       tone: "brand",
+      hint,
     },
   ];
 
@@ -635,6 +702,26 @@ export function DashboardPage() {
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <span className="text-xs font-medium text-gray-500">Período das médias:</span>
+        {PERIODS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => setPeriod(p.days)}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${
+              period === p.days ? "bg-brand-dark text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        {averagesLoading && <span className="text-[11px] text-gray-400">atualizando…</span>}
+        <span className="w-full text-[11px] text-gray-400">
+          Vale para tempo de resposta, tempo e mensagens até o 1º pagamento, conversão em follow-up e tempo no funil.
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} />
@@ -648,7 +735,7 @@ export function DashboardPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel title="Conversão em Follow-up" subtitle="Contatos até a decisão">
+        <Panel title="Conversão em Follow-up" subtitle={`Contatos até a decisão · ${hint}`}>
           <div className="flex gap-6">
             <div className="flex items-center gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
@@ -656,7 +743,7 @@ export function DashboardPage() {
               </span>
               <div>
                 <p className="text-xs text-gray-500">Média até converter</p>
-                <p className="text-xl font-semibold text-emerald-600">{formatContacts(data.followUpOutcomes.avgConverted)}</p>
+                <p className="text-xl font-semibold text-emerald-600">{formatContacts(m.followUpOutcomes.avgConverted)}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -665,14 +752,14 @@ export function DashboardPage() {
               </span>
               <div>
                 <p className="text-xs text-gray-500">Média até desistir (Unfollow)</p>
-                <p className="text-xl font-semibold text-red-500">{formatContacts(data.followUpOutcomes.avgLost)}</p>
+                <p className="text-xl font-semibold text-red-500">{formatContacts(m.followUpOutcomes.avgLost)}</p>
               </div>
             </div>
           </div>
         </Panel>
 
-        <Panel title="Mensagens até o 1º pagamento" subtitle="Média por paciente com histórico de conversa no CRM">
-          {data.avgMessagesToFirstPayment ? (
+        <Panel title="Mensagens até o 1º pagamento" subtitle={`Média por paciente com histórico de conversa no CRM · ${hint}`}>
+          {m.avgMessagesToFirstPayment ? (
             <div className="flex gap-6">
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
@@ -680,42 +767,42 @@ export function DashboardPage() {
                 </span>
                 <div>
                   <p className="text-xs text-gray-500">Recebidas</p>
-                  <p className="text-xl font-semibold text-gray-800">{formatAvg(data.avgMessagesToFirstPayment.inbound)}</p>
+                  <p className="text-xl font-semibold text-gray-800">{formatAvg(m.avgMessagesToFirstPayment.inbound)}</p>
                 </div>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Enviadas</p>
-                <p className="text-xl font-semibold text-gray-800">{formatAvg(data.avgMessagesToFirstPayment.outbound)}</p>
+                <p className="text-xl font-semibold text-gray-800">{formatAvg(m.avgMessagesToFirstPayment.outbound)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Total</p>
-                <p className="text-xl font-semibold text-brand-dark">{formatAvg(data.avgMessagesToFirstPayment.total)}</p>
+                <p className="text-xl font-semibold text-brand-dark">{formatAvg(m.avgMessagesToFirstPayment.total)}</p>
               </div>
             </div>
           ) : (
             <p className="text-sm text-gray-400">Nenhum pagamento com histórico de mensagens ainda.</p>
           )}
-          {data.funnel && (
+          {m.funnel && (
             <div className="mt-4 grid grid-cols-2 gap-4 border-t border-gray-100 pt-4">
               <div>
                 <p className="text-xs text-gray-500">Conversão das conversas</p>
                 <p className="text-xl font-semibold text-emerald-600">
-                  {data.funnel.conversionRate == null ? "—" : `${(data.funnel.conversionRate * 100).toFixed(1)}%`}
+                  {m.funnel.conversionRate == null ? "—" : `${(m.funnel.conversionRate * 100).toFixed(1)}%`}
                 </p>
                 <p className="text-[11px] text-gray-400">
-                  {data.funnel.converted} de {data.funnel.contacted} · {data.funnel.outboundTotal} msgs enviadas
+                  {m.funnel.converted} de {m.funnel.contacted} · {m.funnel.outboundTotal} msgs enviadas
                 </p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Enviadas até desistir</p>
                 <p className="text-xl font-semibold text-red-500">
-                  {data.funnel.avgOutboundUntilGiveUp == null ? "—" : formatAvg(data.funnel.avgOutboundUntilGiveUp)}
+                  {m.funnel.avgOutboundUntilGiveUp == null ? "—" : formatAvg(m.funnel.avgOutboundUntilGiveUp)}
                 </p>
-                <p className="text-[11px] text-gray-400">média de {data.funnel.gaveUp} desistências</p>
+                <p className="text-[11px] text-gray-400">média de {m.funnel.gaveUp} desistências</p>
               </div>
-              {data.funnel.paidWithoutHistory > 0 && (
+              {m.funnel.paidWithoutHistory > 0 && (
                 <p className="col-span-2 text-[11px] text-gray-400">
-                  {data.funnel.paidWithoutHistory} pacientes com pagamento importado, sem histórico de mensagens, ficam fora
+                  {m.funnel.paidWithoutHistory} pacientes com pagamento importado, sem histórico de mensagens, ficam fora
                   destas médias.
                 </p>
               )}
@@ -723,6 +810,49 @@ export function DashboardPage() {
           )}
         </Panel>
       </div>
+
+      {m.stageTimes && (
+        <div className="mt-4">
+          <Panel title="Tempo no funil até a decisão" subtitle={`Média por lead · ${hint}`}>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs font-medium text-gray-500">Tempo em cada etapa</p>
+                {m.stageTimes.perStage.length === 0 ? (
+                  <p className="text-sm text-gray-400">Nenhum lead saiu de uma etapa neste período.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {m.stageTimes.perStage.map((st) => (
+                      <div key={st.name} className="flex items-baseline justify-between gap-4 text-sm">
+                        <span className="text-gray-700">{st.name}</span>
+                        <span>
+                          <span className="font-semibold text-gray-900">{formatDays(st.avgDays)}</span>
+                          <span className="ml-1 text-[11px] text-gray-400">({st.leads} leads)</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-6">
+                <div>
+                  <p className="text-xs text-gray-500">Até entrar em Follow-up</p>
+                  <p className="text-xl font-semibold text-amber-600">{formatDays(m.stageTimes.untilFollowUp.avgDays)}</p>
+                  <p className="text-[11px] text-gray-400">{m.stageTimes.untilFollowUp.leads} leads</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Até entrar em Unfollow</p>
+                  <p className="text-xl font-semibold text-red-500">{formatDays(m.stageTimes.untilUnfollow.avgDays)}</p>
+                  <p className="text-[11px] text-gray-400">{m.stageTimes.untilUnfollow.leads} leads</p>
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] text-gray-400">
+              Tempo em cada etapa conta quando o lead sai dela. Até Follow-up/Unfollow conta da primeira etapa do lead no Kanban
+              até a primeira vez que ele entra ali.
+            </p>
+          </Panel>
+        </div>
+      )}
 
       <div className="mt-4">
         <CashBox />
