@@ -132,7 +132,7 @@ interface PatientRow {
 
 type PatientRole = "ACTIVE_PATIENT" | "LOST_PATIENT";
 
-function PatientsModal({ role, days, onClose }: { role: PatientRole; days: number | null; onClose: () => void }) {
+function PatientsModal({ role, onClose }: { role: PatientRole; onClose: () => void }) {
   const navigate = useNavigate();
   const [patients, setPatients] = useState<PatientRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -140,10 +140,10 @@ function PatientsModal({ role, days, onClose }: { role: PatientRole; days: numbe
 
   useEffect(() => {
     api
-      .get("/dashboard/patients", { params: days == null ? { role } : { role, days } })
+      .get("/dashboard/patients", { params: { role } })
       .then((res) => setPatients(res.data))
       .catch(() => setFailed(true));
-  }, [role, days]);
+  }, [role]);
 
   const term = search.trim().toLowerCase();
   const digits = term.replace(/\D/g, "");
@@ -232,8 +232,6 @@ interface DashboardAverages {
   avgMessagesToFirstPayment: { inbound: number; outbound: number; total: number } | null;
   followUpOutcomes: { avgConverted: number | null; avgLost: number | null };
   funnel?: MessageFunnel;
-  revenue?: { total: number; avgTicket: number | null; avgLtv: number | null };
-  patients?: { active: number; vencida: number };
   stageTimes?: {
     perStage: { name: string; avgDays: number | null; leads: number }[];
     untilFollowUp: { avgDays: number | null; leads: number };
@@ -408,7 +406,7 @@ function bucketByMonth(payments: CashPayment[]): MonthBucket[] {
   return [...map.values()];
 }
 
-function CashBox({ days }: { days: number | null }) {
+function CashBox() {
   const navigate = useNavigate();
   const [payments, setPayments] = useState<CashPayment[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -420,10 +418,10 @@ function CashBox({ days }: { days: number | null }) {
 
   useEffect(() => {
     api
-      .get("/dashboard/cash", { params: days == null ? {} : { days } })
+      .get("/dashboard/cash")
       .then((res) => setPayments(res.data))
       .catch(() => setFailed(true));
-  }, [days]);
+  }, []);
 
   if (failed) {
     return (
@@ -441,9 +439,7 @@ function CashBox({ days }: { days: number | null }) {
   }
 
   const years = Array.from(new Set(payments.map((p) => String(new Date(p.paidAt).getFullYear())))).sort().reverse();
-  // default: newest year that has payments — also when the picked year has none in the Dashboard's
-  // period (e.g. 2025 picked, then "7 dias").
-  const activeYear = year === "all" || (year && years.includes(year)) ? year : years[0] ?? "all";
+  const activeYear = year ?? years[0] ?? "all"; // default: newest year that has payments
   const term = search.trim().toLowerCase();
   const digits = term.replace(/\D/g, "");
 
@@ -460,10 +456,9 @@ function CashBox({ days }: { days: number | null }) {
   const grandTotal = buckets.reduce((sum, b) => sum + b.total, 0);
   const bestMonth = buckets.reduce<MonthBucket | null>((best, b) => (!best || b.total > best.total ? b : best), null);
 
-  const monthInScope = selectedMonth && buckets.some((b) => b.key === selectedMonth) ? selectedMonth : null;
-  const listBuckets = monthInScope ? newestFirst.filter((b) => b.key === selectedMonth) : newestFirst;
+  const listBuckets = selectedMonth ? newestFirst.filter((b) => b.key === selectedMonth) : newestFirst;
   const defaultOpen = new Set(newestFirst[0] ? [newestFirst[0].key] : []);
-  const isOpen = (b: MonthBucket) => monthInScope !== null || (expandedMonths ?? defaultOpen).has(b.key);
+  const isOpen = (b: MonthBucket) => selectedMonth !== null || (expandedMonths ?? defaultOpen).has(b.key);
 
   function toggleMonth(b: MonthBucket) {
     const next = new Set(expandedMonths ?? defaultOpen);
@@ -539,7 +534,7 @@ function CashBox({ days }: { days: number | null }) {
                     <span className="text-[10px] font-medium text-gray-600">{currencyFormatter.format(b.total).replace("R$", "").trim()}</span>
                     <span
                       className={`w-full rounded-t-md ${selected ? "bg-brand-dark" : "bg-brand"} ${
-                        monthInScope && !selected ? "opacity-40" : ""
+                        selectedMonth && !selected ? "opacity-40" : ""
                       }`}
                       style={{ height: `${Math.max(4, Math.round((b.total / maxTotal) * 100))}px` }}
                     />
@@ -660,13 +655,10 @@ export function DashboardPage() {
     funnel: data.funnel,
   };
   const hint = periodHint(averages ? averages.days : null);
-  const revenue = m.revenue ?? data.revenue;
-  const patients = m.patients ?? data.patients;
-  const patientHint = averages?.days == null ? undefined : `Entraram na etapa: ${hint.toLowerCase()}`;
 
   const kpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones; onClick?: () => void; hint?: string }[] = [
-    { label: "Pacientes Ativos", value: String(patients.active), icon: "users", tone: "emerald", onClick: () => setPatientsModal("ACTIVE_PATIENT"), hint: patientHint },
-    { label: "Pacientes Vencidas", value: String(patients.vencida), icon: "alert", tone: "red", onClick: () => setPatientsModal("LOST_PATIENT"), hint: patientHint },
+    { label: "Pacientes Ativos", value: String(data.patients.active), icon: "users", tone: "emerald", onClick: () => setPatientsModal("ACTIVE_PATIENT") },
+    { label: "Pacientes Vencidas", value: String(data.patients.vencida), icon: "alert", tone: "red", onClick: () => setPatientsModal("LOST_PATIENT") },
     { label: "Tempo médio de resposta", value: formatSeconds(m.avgResponseSeconds), icon: "clock", tone: "brand", hint },
     {
       label: "Tempo médio até 1º pagamento",
@@ -685,21 +677,19 @@ export function DashboardPage() {
       ? sortedCohorts
       : sortedCohorts.filter((c) => cohortYear(c.label) === yearFilter);
 
-  const revenueKpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones; hint?: string }[] = [
-    { label: "Faturamento Total", value: currencyFormatter.format(revenue.total), icon: "cash", tone: "brand", hint },
+  const revenueKpis: { label: string; value: string; icon: IconName; tone: keyof typeof tones }[] = [
+    { label: "Faturamento Total", value: currencyFormatter.format(data.revenue.total), icon: "cash", tone: "brand" },
     {
       label: "Ticket Médio",
-      value: revenue.avgTicket == null ? "Sem dados" : currencyFormatter.format(revenue.avgTicket),
+      value: data.revenue.avgTicket == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgTicket),
       icon: "tag",
       tone: "amber",
-      hint,
     },
     {
       label: "LTV Médio",
-      value: revenue.avgLtv == null ? "Sem dados" : currencyFormatter.format(revenue.avgLtv),
+      value: data.revenue.avgLtv == null ? "Sem dados" : currencyFormatter.format(data.revenue.avgLtv),
       icon: "trend",
       tone: "violet",
-      hint,
     },
   ];
 
@@ -728,7 +718,7 @@ export function DashboardPage() {
         ))}
         {averagesLoading && <span className="text-[11px] text-gray-400">atualizando…</span>}
         <span className="w-full text-[11px] text-gray-400">
-          Vale para todos os quadros, menos o Cohort por mês de chegada (que já é separado por mês).
+          Vale para tempo de resposta, tempo e mensagens até o 1º pagamento, conversão em follow-up e tempo no funil.
         </span>
       </div>
 
@@ -865,7 +855,7 @@ export function DashboardPage() {
       )}
 
       <div className="mt-4">
-        <CashBox days={averages ? averages.days : null} />
+        <CashBox />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4">
@@ -959,9 +949,7 @@ export function DashboardPage() {
           )}
         </Panel>
       </div>
-      {patientsModal && (
-        <PatientsModal role={patientsModal} days={averages ? averages.days : null} onClose={() => setPatientsModal(null)} />
-      )}
+      {patientsModal && <PatientsModal role={patientsModal} onClose={() => setPatientsModal(null)} />}
     </div>
   );
 }
