@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { downloadFile } from "../lib/download";
@@ -45,11 +45,12 @@ export function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  // One pick per filter (tag ids, a stage id or NO_STAGE); "" means "todos". Combined with AND.
-  const [monthFilter, setMonthFilter] = useState("");
-  const [objectiveFilter, setObjectiveFilter] = useState("");
-  const [originFilter, setOriginFilter] = useState("");
-  const [stageFilter, setStageFilter] = useState("");
+  // Several picks per filter (tag ids, stage ids or NO_STAGE); empty means "todos". Inside a
+  // filter any pick matches (setembro OR novembro); across filters all must match.
+  const [monthFilter, setMonthFilter] = useState<string[]>([]);
+  const [objectiveFilter, setObjectiveFilter] = useState<string[]>([]);
+  const [originFilter, setOriginFilter] = useState<string[]>([]);
+  const [stageFilter, setStageFilter] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -94,23 +95,22 @@ export function ContactsPage() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return contacts.filter((c) => {
-      for (const tagId of [monthFilter, objectiveFilter, originFilter]) {
-        if (tagId && !c.tags.some((t) => t.id === tagId)) return false;
+      for (const ids of [monthFilter, objectiveFilter, originFilter]) {
+        if (ids.length && !c.tags.some((t) => ids.includes(t.id))) return false;
       }
-      if (stageFilter && (stageFilter === NO_STAGE ? c.stage !== null : c.stage?.id !== stageFilter)) return false;
+      if (stageFilter.length && !stageFilter.includes(c.stage?.id ?? NO_STAGE)) return false;
       if (!query) return true;
       return contactLabel(c).toLowerCase().includes(query) || c.phoneNumber.includes(query);
     });
   }, [contacts, search, monthFilter, objectiveFilter, originFilter, stageFilter]);
 
-  const filterTagIds = [monthFilter, objectiveFilter, originFilter].filter(Boolean);
-  const hasFilters = filterTagIds.length > 0 || !!stageFilter;
+  const hasFilters = [monthFilter, objectiveFilter, originFilter, stageFilter].some((f) => f.length > 0);
 
   function clearFilters() {
-    setMonthFilter("");
-    setObjectiveFilter("");
-    setOriginFilter("");
-    setStageFilter("");
+    setMonthFilter([]);
+    setObjectiveFilter([]);
+    setOriginFilter([]);
+    setStageFilter([]);
   }
 
   async function exportAll() {
@@ -127,8 +127,10 @@ export function ContactsPage() {
   async function exportFiltered() {
     if (!hasFilters) return;
     const params = new URLSearchParams();
-    if (filterTagIds.length) params.set("tagIds", filterTagIds.join(","));
-    if (stageFilter) params.set("stageId", stageFilter);
+    if (monthFilter.length) params.set("months", monthFilter.join(","));
+    if (objectiveFilter.length) params.set("objectives", objectiveFilter.join(","));
+    if (originFilter.length) params.set("origins", originFilter.join(","));
+    if (stageFilter.length) params.set("stages", stageFilter.join(","));
     setExporting(true);
     try {
       await downloadFile(`/contacts/export?${params.toString()}`, "contatos.xlsx");
@@ -370,7 +372,8 @@ export function ContactsPage() {
   );
 }
 
-// A dropdown filter — "Todos" plus one option per value; highlighted while something is picked.
+// A dropdown filter with checkboxes — several picks at once, scrollable when the list is long.
+// Shows how many are picked and is highlighted while anything is.
 function FilterSelect({
   label,
   value,
@@ -378,24 +381,67 @@ function FilterSelect({
   options,
 }: {
   label: string;
-  value: string;
-  onChange: (value: string) => void;
+  value: string[];
+  onChange: (value: string[]) => void;
   options: { id: string; name: string }[];
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  function toggle(id: string) {
+    onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+  }
+
+  const summary =
+    value.length === 0
+      ? `${label}: todos`
+      : value.length === 1
+        ? `${label}: ${options.find((o) => o.id === value[0])?.name ?? "1"}`
+        : `${label}: ${value.length} selecionados`;
+
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`max-w-[220px] rounded-xl border px-3 py-2 text-xs font-medium shadow-sm focus:border-brand focus:outline-none ${
-        value ? "border-brand bg-brand/10 text-brand-dark" : "border-gray-200 bg-white text-gray-600"
-      }`}
-    >
-      <option value="">{label}: todos</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {o.name}
-        </option>
-      ))}
-    </select>
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex max-w-[240px] items-center gap-1 rounded-xl border px-3 py-2 text-xs font-medium shadow-sm focus:outline-none ${
+          value.length ? "border-brand bg-brand/10 text-brand-dark" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+        }`}
+      >
+        <span className="truncate">{summary}</span>
+        <span className="text-[10px] opacity-60">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 w-64 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+          <div className="max-h-64 overflow-y-auto">
+            {options.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Nenhuma opção.</p>}
+            {options.map((o) => (
+              <label key={o.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                <input type="checkbox" checked={value.includes(o.id)} onChange={() => toggle(o.id)} className="accent-brand-dark" />
+                <span className="truncate">{o.name}</span>
+              </label>
+            ))}
+          </div>
+          {value.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="w-full border-t border-gray-100 px-3 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50"
+            >
+              Limpar {label.toLowerCase()}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

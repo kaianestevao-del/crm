@@ -133,20 +133,25 @@ export async function removeContactTag(req: Request, res: Response) {
   res.json({ ok: true });
 }
 
-// Same filters as the Contacts page, so "Baixar filtrados" downloads exactly what's on screen:
-// ?tagIds=a,b — the contact must carry *every* one of those tags (one per filter: mês/ano,
-// objetivo, origem); ?stageId=x — the contact's latest deal is in that Kanban stage ("none" =
-// no deal yet). Neither present means "download all".
+// Comma-separated ids from one query param ("" / absent → []).
+function idList(value: unknown) {
+  return typeof value === "string" ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
+}
+
+// Same filters as the Contacts page, so "Baixar filtrados" downloads exactly what's on screen.
+// Each param is one filter holding several picks: ?months=, ?objectives=, ?origins= (tag ids)
+// and ?stages= (Kanban stage ids of the latest deal, "none" = no deal yet). Inside a filter any
+// pick matches (setembro OR novembro); across filters all must match (mês AND objetivo). No
+// param at all means "download all".
 export async function exportContacts(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
-  const tagIdsParam = typeof req.query.tagIds === "string" ? req.query.tagIds : "";
-  const tagIds = tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
-  const stageId = typeof req.query.stageId === "string" ? req.query.stageId.trim() : "";
+  const tagGroups = [idList(req.query.months), idList(req.query.objectives), idList(req.query.origins)].filter((g) => g.length);
+  const stages = idList(req.query.stages);
 
   const found = await prisma.contact.findMany({
     where: {
       organizationId,
-      ...(tagIds.length > 0 ? { AND: tagIds.map((tagId) => ({ tags: { some: { tagId } } })) } : {}),
+      ...(tagGroups.length > 0 ? { AND: tagGroups.map((ids) => ({ tags: { some: { tagId: { in: ids } } } })) } : {}),
     },
     include: {
       tags: { include: { tag: true } },
@@ -157,8 +162,8 @@ export async function exportContacts(req: Request, res: Response) {
     },
     orderBy: { createdAt: "desc" },
   });
-  const contacts = stageId
-    ? found.filter((c) => (stageId === "none" ? c.deals.length === 0 : c.deals[0]?.stageId === stageId))
+  const contacts = stages.length
+    ? found.filter((c) => stages.includes(c.deals[0]?.stageId ?? "none"))
     : found;
 
   const workbook = new ExcelJS.Workbook();
