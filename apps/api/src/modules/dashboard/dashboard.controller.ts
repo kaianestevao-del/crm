@@ -2,6 +2,16 @@ import { Request, Response } from "express";
 import { MONTH_NAMES_PT, ORIGIN_TAGS_PT } from "@crm/shared";
 import { prisma } from "../../prisma";
 
+// "Geral" — every row is after this.
+const ALL_TIME = new Date(0);
+const PERIOD_DAYS = [1, 7, 15, 30, 90];
+
+// ?days=1|7|15|30|90 → the start of that period; anything else (absent) → ALL_TIME ("Geral").
+function periodStart(req: Request) {
+  const days = Number(req.query.days);
+  return PERIOD_DAYS.includes(days) ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : ALL_TIME;
+}
+
 export async function getDashboardSummary(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
 
@@ -38,20 +48,20 @@ export async function getDashboardSummary(req: Request, res: Response) {
   });
 }
 
-async function getRevenueStats(organizationId: string) {
+async function getRevenueStats(organizationId: string, since = ALL_TIME) {
   const rows = await prisma.$queryRaw<{ total: number | null; avg_ticket: number | null; avg_ltv: number | null }[]>`
     WITH per_contact AS (
       SELECT d."contactId", SUM(dp.value) AS contact_total
       FROM "DealPayment" dp
       JOIN "Deal" d ON d.id = dp."dealId"
-      WHERE d."organizationId" = ${organizationId}
+      WHERE d."organizationId" = ${organizationId} AND dp."paidAt" >= ${since}::timestamp
       GROUP BY d."contactId"
     ),
     all_payments AS (
       SELECT dp.value
       FROM "DealPayment" dp
       JOIN "Deal" d ON d.id = dp."dealId"
-      WHERE d."organizationId" = ${organizationId}
+      WHERE d."organizationId" = ${organizationId} AND dp."paidAt" >= ${since}::timestamp
     )
     SELECT
       (SELECT SUM(value) FROM all_payments) AS total,
@@ -66,32 +76,41 @@ async function getRevenueStats(organizationId: string) {
   };
 }
 
-async function getPatientCounts(organizationId: string) {
+// Patients currently in that stage — in a period, only those who entered it during the period
+// (their open stage-history row started then).
+function patientWhere(organizationId: string, role: "ACTIVE_PATIENT" | "LOST_PATIENT", since: Date) {
+  return {
+    organizationId,
+    stage: { role },
+    ...(since === ALL_TIME ? {} : { stageHistory: { some: { exitedAt: null, enteredAt: { gte: since }, stage: { role } } } }),
+  };
+}
+
+async function getPatientCounts(organizationId: string, since = ALL_TIME) {
   const [active, vencida] = await Promise.all([
-    prisma.deal.count({ where: { organizationId, stage: { role: "ACTIVE_PATIENT" } } }),
-    prisma.deal.count({ where: { organizationId, stage: { role: "LOST_PATIENT" } } }),
+    prisma.deal.count({ where: patientWhere(organizationId, "ACTIVE_PATIENT", since) }),
+    prisma.deal.count({ where: patientWhere(organizationId, "LOST_PATIENT", since) }),
   ]);
   return { active, vencida };
 }
 
-// "Geral" — every row is after this.
-const ALL_TIME = new Date(0);
-const PERIOD_DAYS = [1, 7, 15, 30, 90];
 
 // The Dashboard's averages block, recomputed for a period: ?days=1|7|15|30|90 (absent = geral).
 // Each average counts the events that *happened* in the period — replies sent, first payments,
 // follow-ups that ended, stages left, conversations started.
 export async function getDashboardAverages(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
+  const since = periodStart(req);
   const days = Number(req.query.days);
-  const since = PERIOD_DAYS.includes(days) ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : ALL_TIME;
 
-  const [avgResponseSeconds, firstPayment, followUpOutcomes, funnel, stageTimes] = await Promise.all([
+  const [avgResponseSeconds, firstPayment, followUpOutcomes, funnel, stageTimes, revenue, patients] = await Promise.all([
     getAvgResponseSeconds(organizationId, since),
     getFirstPaymentStats(organizationId, since),
     getFollowUpOutcomes(organizationId, since),
     getMessageFunnel(organizationId, since),
     getStageTimes(organizationId, since),
+    getRevenueStats(organizationId, since),
+    getPatientCounts(organizationId, since),
   ]);
   res.json({
     days: since === ALL_TIME ? null : days,
@@ -101,6 +120,8 @@ export async function getDashboardAverages(req: Request, res: Response) {
     followUpOutcomes,
     funnel,
     stageTimes,
+    revenue,
+    patients,
   });
 }
 
@@ -559,7 +580,7 @@ export async function getPatientsByRole(req: Request, res: Response) {
   if (role !== "ACTIVE_PATIENT" && role !== "LOST_PATIENT") return res.status(400).json({ error: "invalid_role" });
 
   const deals = await prisma.deal.findMany({
-    where: { organizationId, stage: { role } },
+    where: patientWhere(organizationId, role, periodStart(req)),
     select: {
       id: true,
       stage: { select: { name: true } },
@@ -584,7 +605,7 @@ export async function getPatientsByRole(req: Request, res: Response) {
 export async function getCashPayments(req: Request, res: Response) {
   const organizationId = req.auth!.organizationId;
   const payments = await prisma.dealPayment.findMany({
-    where: { deal: { organizationId } },
+    where: { deal: { organizationId }, paidAt: { gte: periodStart(req) } },
     orderBy: { paidAt: "desc" },
     select: {
       id: true,
